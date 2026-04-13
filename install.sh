@@ -24,16 +24,19 @@ fi
 echo "[1/4] Creating directories..."
 mkdir -p "$CLAUDE_DIR/tools"
 mkdir -p "$CLAUDE_DIR/hooks"
-mkdir -p "$CLAUDE_DIR/skills/dream"
+mkdir -p "$CLAUDE_DIR/skills/memclean"
 mkdir -p "$CLAUDE_DIR/skills/reflect"
+mkdir -p "$CLAUDE_DIR/skills/patterns"
 
 # Copy files
 echo "[2/4] Installing files..."
 
 cp "$SCRIPT_DIR/tools/memcapture.py" "$CLAUDE_DIR/tools/memcapture.py"
 cp "$SCRIPT_DIR/tools/memcompile.py" "$CLAUDE_DIR/tools/memcompile.py"
+cp "$SCRIPT_DIR/tools/mempatterns.py" "$CLAUDE_DIR/tools/mempatterns.py"
 echo "  -> tools/memcapture.py (SQLite session capture)"
 echo "  -> tools/memcompile.py (cross-project compiler)"
+echo "  -> tools/mempatterns.py (pattern detection + wiki)"
 
 cp "$SCRIPT_DIR/hooks/memcapture-hook.sh" "$CLAUDE_DIR/hooks/memcapture-hook.sh"
 cp "$SCRIPT_DIR/hooks/memcapture-inject.sh" "$CLAUDE_DIR/hooks/memcapture-inject.sh"
@@ -48,10 +51,16 @@ echo "  -> hooks/memcapture-inject.sh (SessionStart inject)"
 echo "  -> hooks/memdigest-hook.sh (PreCompact LLM memory extraction)"
 echo "  -> hooks/memcompact-hook.sh (PreCompact work-state snapshot)"
 
-cp "$SCRIPT_DIR/skills/dream/SKILL.md" "$CLAUDE_DIR/skills/dream/SKILL.md"
+cp "$SCRIPT_DIR/hooks/mempatterns-hook.sh" "$CLAUDE_DIR/hooks/mempatterns-hook.sh"
+chmod +x "$CLAUDE_DIR/hooks/mempatterns-hook.sh"
+echo "  -> hooks/mempatterns-hook.sh (PreCompact pattern detection)"
+
+cp "$SCRIPT_DIR/skills/memclean/SKILL.md" "$CLAUDE_DIR/skills/memclean/SKILL.md"
 cp "$SCRIPT_DIR/skills/reflect/SKILL.md" "$CLAUDE_DIR/skills/reflect/SKILL.md"
-echo "  -> skills/dream/SKILL.md (memory consolidation)"
+cp "$SCRIPT_DIR/skills/patterns/SKILL.md" "$CLAUDE_DIR/skills/patterns/SKILL.md"
+echo "  -> skills/memclean/SKILL.md (memory consolidation)"
 echo "  -> skills/reflect/SKILL.md (pattern detection)"
+echo "  -> skills/patterns/SKILL.md (pattern explorer)"
 
 # Wire hooks into settings.json
 echo "[3/4] Configuring hooks..."
@@ -100,6 +109,10 @@ if not any("memdigest-hook.sh" in h.get("command", "") for h in hook_list):
 if not any("memcompact-hook.sh" in h.get("command", "") for h in hook_list):
     hook_list.append({"type": "command", "command": "$HOME/.claude/hooks/memcompact-hook.sh"})
     print("  Added PreCompact hook: memcompact-hook.sh")
+
+if not any("mempatterns-hook.sh" in h.get("command", "") for h in hook_list):
+    hook_list.append({"type": "command", "command": "$HOME/.claude/hooks/mempatterns-hook.sh"})
+    print("  Added PreCompact hook: mempatterns-hook.sh")
 
 # Add memcapture-inject to SessionStart
 session_start = hooks.setdefault("SessionStart", [])

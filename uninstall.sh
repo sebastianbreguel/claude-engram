@@ -14,12 +14,15 @@ echo ""
 echo "[1/3] Removing files..."
 rm -f "$CLAUDE_DIR/tools/memcapture.py"
 rm -f "$CLAUDE_DIR/tools/memcompile.py"
+rm -f "$CLAUDE_DIR/tools/mempatterns.py"
 rm -f "$CLAUDE_DIR/hooks/memcapture-hook.sh"
 rm -f "$CLAUDE_DIR/hooks/memcapture-inject.sh"
 rm -f "$CLAUDE_DIR/hooks/memdigest-hook.sh"
 rm -f "$CLAUDE_DIR/hooks/memcompact-hook.sh"
-rm -rf "$CLAUDE_DIR/skills/dream"
+rm -f "$CLAUDE_DIR/hooks/mempatterns-hook.sh"
+rm -rf "$CLAUDE_DIR/skills/memclean"
 rm -rf "$CLAUDE_DIR/skills/reflect"
+rm -rf "$CLAUDE_DIR/skills/patterns"
 echo "  Removed tools, hooks, and skills."
 
 # Remove hooks from settings.json
@@ -37,7 +40,7 @@ hooks = settings.get("hooks", {})
 
 # Remove memcapture hooks from PreCompact
 for entry in hooks.get("PreCompact", []):
-    entry["hooks"] = [h for h in entry.get("hooks", []) if "memcapture" not in h.get("command", "") and "memdigest" not in h.get("command", "") and "memcompact" not in h.get("command", "")]
+    entry["hooks"] = [h for h in entry.get("hooks", []) if "memcapture" not in h.get("command", "") and "memdigest" not in h.get("command", "") and "memcompact" not in h.get("command", "") and "mempatterns" not in h.get("command", "")]
 
 # Remove SessionStart entirely if only memcapture
 session_start = hooks.get("SessionStart", [])
@@ -56,3 +59,5 @@ echo ""
 echo "Note: ~/.claude/memory.db was NOT deleted (contains your session history)."
 echo "To delete it: rm ~/.claude/memory.db"
 echo "To also delete compiled knowledge: rm -rf ~/.claude/compiled-knowledge/"
+echo "Note: ~/.claude/patterns/ was NOT deleted (contains your pattern wiki)."
+echo "To delete it: rm -rf ~/.claude/patterns/"
