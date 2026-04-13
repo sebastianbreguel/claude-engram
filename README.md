@@ -48,6 +48,26 @@ Most Claude Code memory tools add significant ambient token cost, require extern
 | [OpenMemory](https://github.com/CaviraOSS/OpenMemory) | Temporal decay concept | Docker, MCP server, dashboard |
 | [cortex](https://github.com/gambletan/cortex) | Token-budget concept | 27 MCP tools, Rust binary |
 
+### How it compares
+
+| | engram | claude-mem | OpenMemory | cortex |
+|---|---|---|---|---|
+| Ambient token cost | **~350** | ~2K+ | ~1K+ (MCP) | ~3K (27 tools) |
+| External services | None | Agent SDK worker | Docker + MCP server | MCP server |
+| API keys required | No | Yes | No | No |
+| Runtime | Python + SQLite | Node worker | Docker | Rust binary |
+| Install | `./install.sh` | npm + worker | docker compose | cargo |
+
+## What engram stores (and where)
+
+Transparency matters when a tool reads your Claude history:
+
+- **Location**: everything lives in `~/.claude/memory.db` (SQLite) and `~/.claude/patterns/` (markdown). Nothing leaves your machine.
+- **What's captured**: session metadata (project, branch, topic), files touched, tool usage counts, error strings, and LLM-extracted atomic memories (preferences, practices, current context).
+- **What's NOT captured**: no full transcripts, no code content, no secrets from `.env`. Only structural facts and summarized memories.
+- **LLM calls**: only the `memdigest-hook.sh` sends a window of your transcript to Claude for extraction on compact (~2-5K tokens, local to your Claude Code session).
+- **Uninstall**: `./uninstall.sh` removes tools and hooks. Your `memory.db` is preserved unless you delete it manually.
+
 ## Install
 
 **Requirements:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [uv](https://docs.astral.sh/uv/), [jq](https://jqlang.github.io/jq/)
