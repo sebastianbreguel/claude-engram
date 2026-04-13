@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections import defaultdict
 from datetime import date, timedelta
@@ -19,6 +20,175 @@ CO_EDIT_THRESHOLD = 5
 ERROR_RECURRENCE_THRESHOLD = 3
 PROJECT_STREAK_THRESHOLD = 5
 TOOL_ANOMALY_FACTOR = 2.0
+
+
+def _slugify(path: str) -> str:
+    """Convert a file path to a wiki-safe slug: src/auth.py → src-auth-py."""
+    return re.sub(r"[^a-zA-Z0-9]+", "-", path).strip("-")
+
+
+class WikiWriter:
+    """Writes and maintains Obsidian-compatible wiki pages for patterns."""
+
+    def __init__(self, wiki_dir: Path = WIKI_DIR):
+        self.wiki_dir = wiki_dir
+        for subdir in ("entities", "patterns", "suggestions", "corrections"):
+            (wiki_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+    def write_entity_page(
+        self,
+        filepath: str,
+        sessions: int,
+        co_edits: list[tuple[str, int]],
+        errors: list[str],
+    ) -> None:
+        """Write or merge entity page for a file."""
+        slug = _slugify(filepath)
+        page_path = self.wiki_dir / "entities" / f"{slug}.md"
+        today = str(date.today())
+
+        # Defaults — overridden if page already exists
+        first_seen = today
+        existing_co_edits: dict[str, int] = {}
+        existing_errors: list[str] = []
+
+        if page_path.exists():
+            content = page_path.read_text()
+            # Parse first_seen
+            m = re.search(r"first_seen:\s*(\S+)", content)
+            if m:
+                first_seen = m.group(1)
+            # Parse existing co_edits: lines like "- [[slug]] — N sessions"
+            for line in content.splitlines():
+                cm = re.match(r"-\s+\[\[([^\]]+)\]\]\s+[—-]+\s+(\d+)\s+sessions?", line)
+                if cm:
+                    existing_co_edits[cm.group(1)] = int(cm.group(2))
+            # Parse existing errors: lines under "## Common errors"
+            in_errors = False
+            for line in content.splitlines():
+                if line.strip() == "## Common errors":
+                    in_errors = True
+                    continue
+                if in_errors:
+                    if line.startswith("## "):
+                        break
+                    if line.startswith("- "):
+                        existing_errors.append(line[2:])
+
+        # Merge co_edits
+        for partner, count in co_edits:
+            partner_slug = _slugify(partner)
+            existing_co_edits[partner_slug] = count
+
+        # Merge errors (deduplicate)
+        all_errors = list(existing_errors)
+        for e in errors:
+            if e not in all_errors:
+                all_errors.append(e)
+
+        # Build page
+        co_edit_lines = "\n".join(
+            f"- [[{s}]] — {c} sessions" for s, c in existing_co_edits.items()
+        )
+        error_lines = "\n".join(f"- {e}" for e in all_errors)
+
+        content = f"""---
+type: file
+first_seen: {first_seen}
+last_seen: {today}
+sessions: {sessions}
+---
+
+# {filepath}
+
+## Co-edited with
+{co_edit_lines}
+
+## Common errors
+{error_lines}
+"""
+        page_path.write_text(content)
+
+    def write_pattern_page(
+        self,
+        name: str,
+        kind: str,
+        confidence: int,
+        threshold: int,
+        description: str,
+        files: list[str] | None = None,
+    ) -> None:
+        """Write or update a pattern page, preserving history."""
+        page_path = self.wiki_dir / "patterns" / f"{name}.md"
+        today = str(date.today())
+
+        first_detected = today
+        history_lines: list[str] = []
+
+        if page_path.exists():
+            content = page_path.read_text()
+            m = re.search(r"first_detected:\s*(\S+)", content)
+            if m:
+                first_detected = m.group(1)
+            # Parse existing history entries
+            in_history = False
+            for line in content.splitlines():
+                if line.strip() == "## History":
+                    in_history = True
+                    continue
+                if in_history:
+                    if line.startswith("## "):
+                        break
+                    if line.startswith("- "):
+                        history_lines.append(line[2:])
+            # Prepend new reinforcement entry
+            history_lines.insert(0, f"{today}: reinforced (confidence {confidence})")
+        else:
+            history_lines.append(f"{first_detected}: first detected")
+
+        files_section = ""
+        if files:
+            file_lines = "\n".join(f"- [[{_slugify(f)}]]" for f in files)
+            files_section = f"\n## Files\n{file_lines}\n"
+
+        history_text = "\n".join(f"- {h}" for h in history_lines)
+
+        content = f"""---
+type: pattern
+kind: {kind}
+confidence: {confidence}
+threshold: {threshold}
+first_detected: {first_detected}
+last_reinforced: {today}
+status: active
+---
+
+# {name}
+
+{description}
+{files_section}
+## History
+{history_text}
+"""
+        page_path.write_text(content)
+
+    def write_index(self) -> None:
+        """Write index.md with wikilinks to all entities and patterns."""
+        entity_links = "\n".join(
+            f"- [[{p.stem}]]" for p in sorted((self.wiki_dir / "entities").glob("*.md"))
+        )
+        pattern_links = "\n".join(
+            f"- [[{p.stem}]]" for p in sorted((self.wiki_dir / "patterns").glob("*.md"))
+        )
+        content = f"""# Patterns Wiki Index
+
+## Entities
+{entity_links}
+
+## Patterns
+{pattern_links}
+"""
+        (self.wiki_dir / "index.md").write_text(content)
 
 
 class PatternDetector:

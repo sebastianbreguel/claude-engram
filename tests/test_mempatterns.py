@@ -1,4 +1,4 @@
-"""Tests for mempatterns.py — PatternDetector."""
+"""Tests for mempatterns.py — PatternDetector and WikiWriter."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from mempatterns import PatternDetector
+from mempatterns import PatternDetector, WikiWriter, _slugify
 
 
 @pytest.fixture
@@ -438,3 +438,151 @@ def test_context_manager_closes_connection(tmp_db, wiki_dir):
     # After exit, connection should be closed — cursor ops should fail
     with pytest.raises(Exception):
         internal_conn.execute("SELECT 1")
+
+
+# ---------------------------------------------------------------------------
+# _slugify
+# ---------------------------------------------------------------------------
+
+
+def test_slugify_simple_path():
+    assert _slugify("src/auth.py") == "src-auth-py"
+
+
+def test_slugify_dots_and_slashes():
+    assert _slugify("src/models/user.py") == "src-models-user-py"
+
+
+def test_slugify_spaces():
+    assert _slugify("my file.py") == "my-file-py"
+
+
+def test_slugify_no_path_separators():
+    assert _slugify("auth.py") == "auth-py"
+
+
+# ---------------------------------------------------------------------------
+# WikiWriter — entity pages
+# ---------------------------------------------------------------------------
+
+
+def test_entity_page_creation(wiki_dir):
+    w = WikiWriter(wiki_dir=wiki_dir)
+    w.write_entity_page(
+        "src/auth.py",
+        sessions=34,
+        co_edits=[("src/middleware.py", 12), ("src/models/user.py", 5)],
+        errors=["ImportError: cannot import 'TokenStore' — 3 occurrences"],
+    )
+    page = (wiki_dir / "entities" / "src-auth-py.md").read_text()
+    assert "sessions: 34" in page
+    assert "[[src-middleware-py]]" in page
+    assert "[[src-models-user-py]]" in page
+    assert "ImportError" in page
+
+
+def test_entity_page_merge(wiki_dir):
+    """Calling write_entity_page twice must merge co_edits, not overwrite."""
+    w = WikiWriter(wiki_dir=wiki_dir)
+    w.write_entity_page(
+        "src/auth.py",
+        sessions=10,
+        co_edits=[("src/middleware.py", 12)],
+        errors=[],
+    )
+    w.write_entity_page(
+        "src/auth.py",
+        sessions=20,
+        co_edits=[("src/models.py", 5)],
+        errors=["TypeError: foo"],
+    )
+    page = (wiki_dir / "entities" / "src-auth-py.md").read_text()
+    assert "[[src-middleware-py]]" in page
+    assert "[[src-models-py]]" in page
+    assert "TypeError: foo" in page
+    assert "sessions: 20" in page
+
+
+def test_entity_page_preserves_first_seen(wiki_dir):
+    w = WikiWriter(wiki_dir=wiki_dir)
+    w.write_entity_page("src/auth.py", sessions=1, co_edits=[], errors=[])
+    first_content = (wiki_dir / "entities" / "src-auth-py.md").read_text()
+    # Extract first_seen line
+    first_seen_line = next(
+        line for line in first_content.splitlines() if "first_seen" in line
+    )
+
+    w.write_entity_page("src/auth.py", sessions=2, co_edits=[], errors=[])
+    second_content = (wiki_dir / "entities" / "src-auth-py.md").read_text()
+    assert first_seen_line in second_content
+
+
+# ---------------------------------------------------------------------------
+# WikiWriter — pattern pages
+# ---------------------------------------------------------------------------
+
+
+def test_pattern_page_creation(wiki_dir):
+    w = WikiWriter(wiki_dir=wiki_dir)
+    w.write_pattern_page(
+        name="auth-middleware-pair",
+        kind="co-edit",
+        confidence=12,
+        threshold=5,
+        description="auth and middleware edited together.",
+        files=["src/auth.py"],
+    )
+    page = (wiki_dir / "patterns" / "auth-middleware-pair.md").read_text()
+    assert "kind: co-edit" in page
+    assert "confidence: 12" in page
+    assert "[[src-auth-py]]" in page
+    assert "first detected" in page
+
+
+def test_pattern_page_update_preserves_first_detected_and_history(wiki_dir):
+    w = WikiWriter(wiki_dir=wiki_dir)
+    w.write_pattern_page(
+        name="auth-middleware-pair",
+        kind="co-edit",
+        confidence=5,
+        threshold=5,
+        description="desc",
+    )
+    first_content = (wiki_dir / "patterns" / "auth-middleware-pair.md").read_text()
+    first_detected = next(
+        line for line in first_content.splitlines() if "first_detected" in line
+    )
+
+    w.write_pattern_page(
+        name="auth-middleware-pair",
+        kind="co-edit",
+        confidence=12,
+        threshold=5,
+        description="desc updated",
+    )
+    second_content = (wiki_dir / "patterns" / "auth-middleware-pair.md").read_text()
+    assert first_detected in second_content
+    # Should have two history entries
+    assert second_content.count("reinforced") >= 1
+    assert "first detected" in second_content
+
+
+# ---------------------------------------------------------------------------
+# WikiWriter — index
+# ---------------------------------------------------------------------------
+
+
+def test_write_index(wiki_dir):
+    w = WikiWriter(wiki_dir=wiki_dir)
+    w.write_entity_page("src/auth.py", sessions=5, co_edits=[], errors=[])
+    w.write_pattern_page(
+        name="auth-middleware-pair",
+        kind="co-edit",
+        confidence=5,
+        threshold=5,
+        description="desc",
+    )
+    w.write_index()
+    index = (wiki_dir / "index.md").read_text()
+    assert "[[src-auth-py]]" in index
+    assert "[[auth-middleware-pair]]" in index
