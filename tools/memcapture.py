@@ -141,6 +141,18 @@ class MemoryDB:
             CREATE INDEX IF NOT EXISTS idx_files_session ON files_touched(session_id);
             CREATE INDEX IF NOT EXISTS idx_files_path ON files_touched(path);
             CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
+
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY,
+                topic TEXT NOT NULL UNIQUE,
+                content TEXT NOT NULL,
+                durability TEXT NOT NULL CHECK(durability IN ('durable', 'ephemeral')),
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed TEXT NOT NULL DEFAULT (datetime('now')),
+                source_session TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_memories_durability ON memories(durability);
+            CREATE INDEX IF NOT EXISTS idx_memories_last_accessed ON memories(last_accessed DESC);
         """)
 
         # FTS5 standalone table — we insert directly, no content sync needed
@@ -358,6 +370,56 @@ class MemoryDB:
 
         lines.append("</session-memory>")
         return "\n".join(lines)
+
+    def upsert_memory(
+        self,
+        topic: str,
+        content: str,
+        durability: str,
+        source_session: str | None = None,
+    ) -> None:
+        self.conn.execute(
+            """INSERT INTO memories (topic, content, durability, source_session)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(topic) DO UPDATE SET
+                   content = excluded.content,
+                   durability = excluded.durability,
+                   last_accessed = datetime('now'),
+                   source_session = excluded.source_session""",
+            (topic, content, durability, source_session),
+        )
+        self.conn.commit()
+
+    def cleanup_ephemeral(self) -> int:
+        cursor = self.conn.execute(
+            "DELETE FROM memories WHERE durability = 'ephemeral' AND created_at < datetime('now', '-7 days')"
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
+    def list_memories(self, topic_pattern: str | None = None) -> list[dict]:
+        if topic_pattern:
+            rows = self.conn.execute(
+                "SELECT topic, content, durability, created_at, last_accessed FROM memories WHERE topic LIKE ? ORDER BY last_accessed DESC",
+                (topic_pattern,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT topic, content, durability, created_at, last_accessed FROM memories ORDER BY last_accessed DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def forget_memory(self, topic: str) -> bool:
+        cursor = self.conn.execute("DELETE FROM memories WHERE topic = ?", (topic,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def forget_all_ephemeral(self) -> int:
+        cursor = self.conn.execute(
+            "DELETE FROM memories WHERE durability = 'ephemeral'"
+        )
+        self.conn.commit()
+        return cursor.rowcount
 
     def close(self) -> None:
         self.conn.close()
