@@ -845,74 +845,53 @@ def find_current_session() -> tuple[Path, str] | None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Automatic session memory capture")
-    parser.add_argument(
-        "--all", action="store_true", help="Capture all uncaptured sessions"
+    parser = argparse.ArgumentParser(
+        description="engram — persistent memory for Claude Code",
+        epilog="Advanced/internal flags (used by hooks) are hidden. See docs/cli-reference.md.",
     )
-    parser.add_argument("--query", "-q", type=str, help="FTS5 search captured facts")
-    parser.add_argument("--stats", action="store_true", help="Show capture statistics")
-    parser.add_argument("--recent", type=int, metavar="N", help="Show last N sessions")
+    # User-facing flags (4 essentials)
     parser.add_argument(
-        "--inject",
-        action="store_true",
-        help="Output context for SessionStart (~200 tokens)",
+        "--stats", action="store_true", help="Show what engram has learned"
     )
     parser.add_argument(
-        "--inject-project", type=str, help="Filter inject to specific project"
-    )
-    parser.add_argument(
-        "--transcript", type=str, help="Capture a specific transcript file"
-    )
-    parser.add_argument(
-        "--extract-facts",
-        action="store_true",
-        default=bool(os.environ.get("MEMCAPTURE_EXTRACT_FACTS")),
-        help="Enable experimental regex extraction of decisions/corrections",
-    )
-    parser.add_argument(
-        "--ingest-digest",
-        action="store_true",
-        help="Read digest output from stdin and upsert into memories table",
-    )
-    parser.add_argument(
-        "--session-id",
-        type=str,
-        help="Session ID for source tracking (used with --ingest-digest)",
+        "--query", "-q", type=str, metavar="TERM", help="Search captured facts"
     )
     parser.add_argument(
         "--memories",
         nargs="?",
         const="*",
         metavar="PATTERN",
-        help="List memories (optional topic LIKE pattern, e.g. 'test_*')",
+        help="List learned memories (optional topic pattern)",
     )
     parser.add_argument(
-        "--forget",
-        type=str,
-        metavar="TOPIC",
-        help="Delete a memory by topic",
+        "--forget", type=str, metavar="TOPIC", help="Delete a memory by topic"
     )
+
+    # Hook-internal flags (hidden from --help but still functional)
+    parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--recent", type=int, metavar="N", help=argparse.SUPPRESS)
+    parser.add_argument("--inject", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--inject-project", type=str, help=argparse.SUPPRESS)
+    parser.add_argument("--transcript", type=str, help=argparse.SUPPRESS)
     parser.add_argument(
-        "--ephemeral",
+        "--extract-facts",
         action="store_true",
-        help="With --forget: delete all ephemeral memories",
+        default=bool(os.environ.get("MEMCAPTURE_EXTRACT_FACTS")),
+        help=argparse.SUPPRESS,
     )
+    parser.add_argument("--ingest-digest", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--session-id", type=str, help=argparse.SUPPRESS)
+    parser.add_argument("--ephemeral", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
-        "--ingest-snapshot",
-        action="store_true",
-        help="Read snapshot JSON from stdin and store in compactions table",
+        "--ingest-snapshot", action="store_true", help=argparse.SUPPRESS
     )
-    parser.add_argument(
-        "--project",
-        type=str,
-        help="Project name (used with --ingest-snapshot)",
-    )
+    parser.add_argument("--project", type=str, help=argparse.SUPPRESS)
     parser.add_argument(
         "--compactions",
         nargs="?",
         const="*",
         metavar="PROJECT",
-        help="List compaction events (optional project filter)",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 
