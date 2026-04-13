@@ -849,6 +849,23 @@ def main() -> None:
         action="store_true",
         help="With --forget: delete all ephemeral memories",
     )
+    parser.add_argument(
+        "--ingest-snapshot",
+        action="store_true",
+        help="Read snapshot JSON from stdin and store in compactions table",
+    )
+    parser.add_argument(
+        "--project",
+        type=str,
+        help="Project name (used with --ingest-snapshot)",
+    )
+    parser.add_argument(
+        "--compactions",
+        nargs="?",
+        const="*",
+        metavar="PROJECT",
+        help="List compaction events (optional project filter)",
+    )
     args = parser.parse_args()
 
     db = MemoryDB()
@@ -876,6 +893,11 @@ def main() -> None:
             print("\nTop files:")
             for path, count in s["top_files"]:
                 print(f"  {path:80s} {count:3d}")
+            cs = db.compaction_stats()
+            print(f"\nCompactions: {cs['total']}")
+            if cs["by_project"]:
+                for proj, count in cs["by_project"][:5]:
+                    print(f"  {proj[:50]:50s} {count:3d}")
             return
 
         if args.recent:
@@ -902,6 +924,39 @@ def main() -> None:
                     source_session=args.session_id,
                 )
             print(f"Ingested {len(memories)} memories")
+            return
+
+        if args.ingest_snapshot:
+            text = sys.stdin.read().strip()
+            project = args.project or "unknown"
+            session_id = args.session_id
+            snapshot = text if text else None
+            db.save_compaction(session_id, project, snapshot)
+            print(
+                f"Compaction recorded for {project}"
+                + (" with snapshot" if snapshot else "")
+            )
+            return
+
+        if args.compactions is not None:
+            if args.compactions == "*":
+                rows = db.conn.execute(
+                    "SELECT project, session_id, compacted_at, CASE WHEN snapshot IS NOT NULL THEN 'yes' ELSE 'no' END as has_snapshot FROM compactions ORDER BY compacted_at DESC LIMIT 20"
+                ).fetchall()
+            else:
+                rows = db.conn.execute(
+                    "SELECT project, session_id, compacted_at, CASE WHEN snapshot IS NOT NULL THEN 'yes' ELSE 'no' END as has_snapshot FROM compactions WHERE project LIKE ? ORDER BY compacted_at DESC LIMIT 20",
+                    (f"%{args.compactions}%",),
+                ).fetchall()
+            if not rows:
+                print("No compactions recorded")
+                return
+            for r in rows:
+                sid = (r["session_id"] or "?")[:8]
+                print(
+                    f"  {r['compacted_at'][:16]}  {r['project'][:40]:40s}  session={sid}  snapshot={r['has_snapshot']}"
+                )
+            print(f"\n{len(rows)} compaction events")
             return
 
         if args.memories is not None:
