@@ -99,6 +99,21 @@ Current context:
 </session-memory>
 ```
 
+### Smart Compaction (work-state preservation)
+
+When your context compacts, `memcompact-hook.sh` captures your current work state via `claude --print` — what you're working on, which files, last error, and a brief context summary. On resume, this is injected as a separate block:
+
+```xml
+<compaction-snapshot>
+Resuming: Implementing OAuth2 refresh token flow
+Files in progress: src/auth.py, tests/test_auth.py
+Last error: none
+Context: OAuth2 authorization code flow is done. Next step is refresh token rotation. User chose separate token store over cookie-based approach.
+</compaction-snapshot>
+```
+
+The snapshot auto-expires after 2 hours and is never injected into new sessions — it only helps when resuming after a compaction in the same session.
+
 ### Experimental: Semantic Fact Extraction
 
 Opt-in regex-based extraction of decisions and corrections from conversations. Disabled by default — the heuristics have a meaningful false positive rate (~30-50%).
@@ -159,6 +174,8 @@ Walks all `~/.claude/projects/*/memory/*.md` directories and generates:
 | SessionStart inject | ~350 | Every session (learned memories) |
 | memcapture hook | 0 | Background, no LLM |
 | memdigest hook | ~2-5K input | Background, via claude --print |
+| memcompact hook | ~2-3K input | Background, via claude --print |
+| Snapshot inject | ~100-150 | Only post-compaction resumes |
 | `/dream` skill | ~700 | Only when invoked |
 | `/reflect` skill | ~500 | Only when invoked |
 | memcompile concepts | ~300 | Only when run + 1 API call |
@@ -267,6 +284,10 @@ uv run ~/.claude/tools/memcapture.py --recent 10        # last N sessions with t
 # Inject
 uv run ~/.claude/tools/memcapture.py --inject                              # all projects
 uv run ~/.claude/tools/memcapture.py --inject --inject-project="my-proj"   # scoped
+
+# Compaction
+uv run ~/.claude/tools/memcapture.py --compactions           # list compaction events
+uv run ~/.claude/tools/memcapture.py --compactions "my-proj"  # filter by project
 ```
 
 ### memcompile.py
@@ -287,12 +308,14 @@ Requires `ANTHROPIC_API_KEY` for concept compilation (uses claude-sonnet for one
 │   ├── sessions                 # id, project, branch, topic, timestamps
 │   ├── facts                    # decisions, corrections, errors (deduped)
 │   ├── memories                 # atomic learned facts (topic-keyed upsert)
+│   ├── compactions              # compaction events + work-state snapshots
 │   ├── files_touched            # path + action + count per session
 │   └── tool_usage               # tool name + count per session
 │
 ├── hooks/
 │   ├── memcapture-hook.sh       # PreCompact → background capture
 │   ├── memdigest-hook.sh        # PreCompact → LLM memory extraction
+│   ├── memcompact-hook.sh       # PreCompact → work-state snapshot
 │   └── memcapture-inject.sh     # SessionStart → inject memories
 │
 ├── tools/
@@ -346,6 +369,14 @@ CREATE TABLE memories (
 
 -- FTS5 virtual table for full-text search
 CREATE VIRTUAL TABLE facts_fts USING fts5(content, type, project);
+
+-- Compactions table (tracking + work-state snapshots)
+CREATE TABLE compactions (
+    session_id TEXT,
+    project TEXT NOT NULL,
+    snapshot TEXT,           -- JSON: {task, files, last_error, summary}
+    compacted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Files and tool usage
 CREATE TABLE files_touched (session_id, path, action, count);
