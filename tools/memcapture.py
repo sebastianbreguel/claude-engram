@@ -324,7 +324,7 @@ class MemoryDB:
         return []
 
     def inject_context(self, project: str | None = None) -> str:
-        """Generate ~350 token context block from learned memories."""
+        """Generate ~350 token context block from learned memories + optional compaction snapshot."""
         self.cleanup_ephemeral()
 
         rows = self.conn.execute(
@@ -332,44 +332,74 @@ class MemoryDB:
         ).fetchall()
 
         if not rows:
-            return self._fallback_inject(project)
+            output = self._fallback_inject(project)
+        else:
+            # Update last_accessed for included memories
+            topics = [r["topic"] for r in rows]
+            if topics:
+                placeholders = ",".join("?" * len(topics))
+                self.conn.execute(
+                    f"UPDATE memories SET last_accessed = datetime('now') WHERE topic IN ({placeholders})",
+                    topics,
+                )
+                self.conn.commit()
 
-        # Update last_accessed for included memories
-        topics = [r["topic"] for r in rows]
-        if topics:
-            placeholders = ",".join("?" * len(topics))
-            self.conn.execute(
-                f"UPDATE memories SET last_accessed = datetime('now') WHERE topic IN ({placeholders})",
-                topics,
+            durable = [r for r in rows if r["durability"] == "durable"]
+            ephemeral = [r for r in rows if r["durability"] == "ephemeral"]
+
+            lines = ["<session-memory>"]
+            char_budget = 1400
+            used = 0
+
+            if durable:
+                lines.append("Learned preferences & practices:")
+                for r in durable:
+                    line = f"- {r['content'][:120]}"
+                    if used + len(line) > char_budget:
+                        break
+                    lines.append(line)
+                    used += len(line)
+
+            if ephemeral:
+                lines.append("Current context:")
+                for r in ephemeral:
+                    line = f"- {r['content'][:120]}"
+                    if used + len(line) > char_budget:
+                        break
+                    lines.append(line)
+                    used += len(line)
+
+            lines.append("</session-memory>")
+            output = "\n".join(lines)
+
+        # Append compaction snapshot if available
+        if project:
+            snapshot = self.get_latest_snapshot(project)
+            if snapshot and snapshot["snapshot"]:
+                output += "\n" + self._format_snapshot(snapshot["snapshot"])
+
+        return output
+
+    def _format_snapshot(self, snapshot_json: str) -> str:
+        """Format a compaction snapshot as an injection block."""
+        try:
+            data = json.loads(snapshot_json)
+        except (json.JSONDecodeError, TypeError):
+            return ""
+
+        lines = ["<compaction-snapshot>"]
+        if data.get("task"):
+            lines.append(f"Resuming: {data['task']}")
+        if data.get("files"):
+            files = (
+                data["files"] if isinstance(data["files"], list) else [data["files"]]
             )
-            self.conn.commit()
-
-        durable = [r for r in rows if r["durability"] == "durable"]
-        ephemeral = [r for r in rows if r["durability"] == "ephemeral"]
-
-        lines = ["<session-memory>"]
-        char_budget = 1400
-        used = 0
-
-        if durable:
-            lines.append("Learned preferences & practices:")
-            for r in durable:
-                line = f"- {r['content'][:120]}"
-                if used + len(line) > char_budget:
-                    break
-                lines.append(line)
-                used += len(line)
-
-        if ephemeral:
-            lines.append("Current context:")
-            for r in ephemeral:
-                line = f"- {r['content'][:120]}"
-                if used + len(line) > char_budget:
-                    break
-                lines.append(line)
-                used += len(line)
-
-        lines.append("</session-memory>")
+            lines.append(f"Files in progress: {', '.join(str(f) for f in files)}")
+        if data.get("last_error"):
+            lines.append(f"Last error: {data['last_error']}")
+        if data.get("summary"):
+            lines.append(f"Context: {data['summary']}")
+        lines.append("</compaction-snapshot>")
         return "\n".join(lines)
 
     def _fallback_inject(self, project: str | None = None) -> str:
