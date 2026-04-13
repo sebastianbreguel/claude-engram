@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime
@@ -279,10 +280,30 @@ class MemoryDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def _git_recent_commits(self, cwd: str | None, limit: int = 5) -> list[str]:
+        """Get recent commit onelines for a project directory."""
+        if not cwd:
+            return []
+        try:
+            result = subprocess.run(
+                ["git", "log", "--oneline", f"-{limit}"],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return [
+                    line.strip()
+                    for line in result.stdout.strip().splitlines()
+                    if line.strip()
+                ]
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+        return []
+
     def inject_context(self, project: str | None = None) -> str:
         """Generate ~200 token context block for SessionStart injection."""
-        # Prefix match: project key from cwd is a prefix of the stored project name
-        # e.g. "-Users-seba-myproject" matches "-Users-seba-myproject-packages-backend"
         if project:
             where_s = "WHERE s.project LIKE ?"
             where_sf = "WHERE s.project LIKE ? AND"
@@ -294,21 +315,26 @@ class MemoryDB:
 
         # Last 3 sessions with topics
         sessions = self.conn.execute(
-            f"SELECT s.topic, s.branch, s.captured_at FROM sessions s {where_s} ORDER BY s.captured_at DESC LIMIT 3",
+            f"SELECT s.topic, s.branch, s.captured_at, s.cwd FROM sessions s {where_s} ORDER BY s.captured_at DESC LIMIT 3",
             params,
         ).fetchall()
 
-        # Recent decisions (last 5, deduped)
-        decisions = self.conn.execute(
-            f"SELECT DISTINCT f.content FROM facts f JOIN sessions s ON f.session_id = s.session_id {where_sf} f.type = 'decision' ORDER BY f.created_at DESC LIMIT 5",
+        # Recent errors (last 3)
+        errors = self.conn.execute(
+            f"SELECT DISTINCT f.content FROM facts f JOIN sessions s ON f.session_id = s.session_id {where_sf} f.type = 'error' ORDER BY f.created_at DESC LIMIT 3",
             params,
         ).fetchall()
 
-        # Recent corrections (last 3)
-        corrections = self.conn.execute(
-            f"SELECT DISTINCT f.content FROM facts f JOIN sessions s ON f.session_id = s.session_id {where_sf} f.type = 'correction' ORDER BY f.created_at DESC LIMIT 3",
-            params,
-        ).fetchall()
+        # Git commits from the project cwd
+        cwd = None
+        if sessions:
+            cwd = sessions[0]["cwd"]
+        if not cwd and project:
+            cwd = project.replace("-", "/")
+            if not cwd.startswith("/"):
+                cwd = "/" + cwd
+
+        commits = self._git_recent_commits(cwd, limit=5)
 
         lines = ["<session-memory>"]
         if sessions:
@@ -320,15 +346,15 @@ class MemoryDB:
                     f"- {s['captured_at'][:10]} {f'({branch}) ' if branch else ''}{topic[:100]}"
                 )
 
-        if decisions:
-            lines.append("Recent decisions:")
-            for d in decisions:
-                lines.append(f"- {d['content'][:120]}")
+        if commits:
+            lines.append("Recent commits:")
+            for c in commits:
+                lines.append(f"- {c[:120]}")
 
-        if corrections:
-            lines.append("Recent corrections:")
-            for c in corrections:
-                lines.append(f"- {c['content'][:120]}")
+        if errors:
+            lines.append("Recent errors:")
+            for e in errors:
+                lines.append(f"- {e['content'][:120]}")
 
         lines.append("</session-memory>")
         return "\n".join(lines)
@@ -370,9 +396,12 @@ class SessionData:
 class TranscriptParser:
     """Parses JSONL transcripts and extracts structured data."""
 
-    def parse_file(self, path: Path, project: str) -> SessionData | None:
+    def parse_file(
+        self, path: Path, project: str, extract_facts: bool = False
+    ) -> SessionData | None:
         session_id = path.stem
         session = SessionData(session_id, project, str(path))
+        self._extract_facts = extract_facts
         first_user_msg = True
 
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -443,20 +472,23 @@ class TranscriptParser:
             if branch_match:
                 session.branch = branch_match.group(1)
 
-        # --- Decisions ---
-        for pattern in DECISION_PATTERNS:
-            if pattern.search(clean):
-                for sentence in re.split(r"[.!?\n]", clean):
-                    if pattern.search(sentence) and len(sentence.strip()) > 10:
-                        session.add_fact("decision", sentence.strip()[:500], line_num)
-                        break
-                break
+        # --- Decisions (opt-in) ---
+        if self._extract_facts:
+            for pattern in DECISION_PATTERNS:
+                if pattern.search(clean):
+                    for sentence in re.split(r"[.!?\n]", clean):
+                        if pattern.search(sentence) and len(sentence.strip()) > 10:
+                            session.add_fact(
+                                "decision", sentence.strip()[:500], line_num
+                            )
+                            break
+                    break
 
-        # --- Corrections ---
-        for pattern in CORRECTION_PATTERNS:
-            if pattern.search(clean) and len(clean) < 300:
-                session.add_fact("correction", clean[:500], line_num)
-                break
+            # --- Corrections (opt-in) ---
+            for pattern in CORRECTION_PATTERNS:
+                if pattern.search(clean) and len(clean) < 300:
+                    session.add_fact("correction", clean[:500], line_num)
+                    break
 
     def _process_tool_result(
         self, block: dict, session: SessionData, line_num: int
@@ -610,6 +642,12 @@ def main() -> None:
     parser.add_argument(
         "--transcript", type=str, help="Capture a specific transcript file"
     )
+    parser.add_argument(
+        "--extract-facts",
+        action="store_true",
+        default=bool(os.environ.get("MEMCAPTURE_EXTRACT_FACTS")),
+        help="Enable experimental regex extraction of decisions/corrections",
+    )
     args = parser.parse_args()
 
     db = MemoryDB()
@@ -631,10 +669,10 @@ def main() -> None:
             print(f"Sessions captured: {s['sessions']}")
             print(f"Unique files touched: {s['unique_files']}")
             print(f"Facts by type: {s['facts_by_type']}")
-            print(f"\nTop tools:")
+            print("\nTop tools:")
             for name, count in s["top_tools"]:
                 print(f"  {name:30s} {count:5d}")
-            print(f"\nTop files:")
+            print("\nTop files:")
             for path, count in s["top_files"]:
                 print(f"  {path:80s} {count:3d}")
             return
@@ -672,7 +710,9 @@ def main() -> None:
                 skipped += 1
                 continue
 
-            session = transcript_parser.parse_file(path, project)
+            session = transcript_parser.parse_file(
+                path, project, extract_facts=args.extract_facts
+            )
             if session is None:
                 skipped += 1
                 continue
