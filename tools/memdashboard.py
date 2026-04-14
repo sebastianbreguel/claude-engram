@@ -312,11 +312,21 @@ def query_project_profiles(
             (slug,),
         ).fetchall()
 
+        # Synthesize a one-paragraph "about" summary from available signals
+        about = _synthesize_project_about(
+            short,
+            p["sessions"],
+            tech_stack,
+            [t["topic"] for t in topics if t["topic"]],
+            handoff["content"] if handoff else None,
+        )
+
         profiles.append(
             {
                 "slug": slug,
                 "name": short,
                 "sessions": p["sessions"],
+                "about": about,
                 "handoff": handoff["content"] if handoff else None,
                 "topics": [
                     {
@@ -348,6 +358,144 @@ def query_project_profiles(
         )
 
     return profiles
+
+
+# Maps common file extensions to the language/ecosystem they belong to
+_TECH_LABELS = {
+    ".py": "Python",
+    ".ts": "TypeScript",
+    ".tsx": "React/TSX",
+    ".js": "JavaScript",
+    ".jsx": "React/JSX",
+    ".rs": "Rust",
+    ".go": "Go",
+    ".sql": "SQL",
+    ".ipynb": "Jupyter",
+    ".sh": "shell",
+    ".md": "docs",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".toml": "config",
+    ".json": "JSON",
+    ".html": "HTML",
+    ".css": "CSS",
+}
+
+
+def _synthesize_project_about(
+    name: str,
+    sessions: int,
+    tech_stack: list[str],
+    topics: list[str],
+    handoff: str | None,
+) -> str:
+    """Build a one-paragraph summary from available signals."""
+    langs = [_TECH_LABELS[e] for e in tech_stack if e in _TECH_LABELS][:3]
+    lang_phrase = ""
+    if langs:
+        if len(langs) == 1:
+            lang_phrase = f" A {langs[0]} project"
+        else:
+            lang_phrase = f" A {'/'.join(langs[:2])} project"
+
+    # Infer focus from most frequent topic keywords
+    focus = ""
+    if topics:
+        # Pick first non-empty topic that isn't just a generic handoff string
+        for t in topics:
+            if t and len(t) > 10:
+                focus = f' Recent work: "{t[:80].strip()}".'
+                break
+
+    base = f"{name} · {sessions} sessions.{lang_phrase}.".replace("..", ".")
+    return base + focus
+
+
+def query_developer_profile(
+    conn: sqlite3.Connection,
+    ignore_list: list[str],
+    memories: list[dict],
+    activity: list[dict],
+    tools: list[dict],
+    projects: list[dict],
+) -> dict:
+    """Synthesize a developer profile from memories + behavioral data."""
+    # Categorize durable memories
+    preferences: list[dict] = []
+    practices: list[dict] = []
+    project_knowledge = 0
+
+    for m in memories:
+        if m["durability"] != "durable":
+            continue
+        topic = m["topic"]
+        content = m["content"]
+        # Heuristic: per-project handoffs are project knowledge, not profile
+        if topic.startswith("handoff_") or topic.startswith("bc_"):
+            project_knowledge += 1
+        elif any(
+            kw in content.lower()
+            for kw in ("uses ", "prefers ", "never ", "always ", "wants ", "refuses ")
+        ):
+            preferences.append({"topic": topic, "content": content})
+        else:
+            practices.append({"topic": topic, "content": content})
+
+    # Activity stats
+    active_days = len(activity)
+    peak_day = max(activity, key=lambda x: x["count"]) if activity else None
+    total_sessions_active = sum(a["count"] for a in activity)
+
+    # Streak calculation: consecutive days with activity ending today or yesterday
+    streak = 0
+    if activity:
+        active_set = {a["day"] for a in activity}
+        today = date.today()
+        # Start from today, or yesterday if today has no activity yet
+        cursor = today if today.isoformat() in active_set else today - timedelta(days=1)
+        while cursor.isoformat() in active_set:
+            streak += 1
+            cursor -= timedelta(days=1)
+
+    # Top tools
+    top_tools = [t["tool"] for t in tools[:5]]
+
+    # Tech stack across all non-ignored projects
+    where, params = _ignore_where(ignore_list, "s.project")
+    all_files = conn.execute(
+        f"SELECT ft.path FROM files_touched ft JOIN sessions s ON ft.session_id = s.session_id{where}",
+        params,
+    ).fetchall()
+    ext_counter: Counter = Counter()
+    for row in all_files:
+        path = row["path"]
+        if "." in path.split("/")[-1]:
+            ext = "." + path.split("/")[-1].rsplit(".", 1)[-1]
+            ext_counter[ext] += 1
+    langs: list[str] = []
+    for ext, _ in ext_counter.most_common(20):
+        label = _TECH_LABELS.get(ext)
+        if label and label not in langs:
+            langs.append(label)
+        if len(langs) >= 6:
+            break
+
+    # Most recent activity date, for context
+    last_active = max((a["day"] for a in activity), default=None) if activity else None
+
+    return {
+        "preferences": preferences[:8],
+        "practices": practices[:6],
+        "project_knowledge_count": project_knowledge,
+        "active_days": active_days,
+        "peak_day": peak_day,
+        "total_active_sessions": total_sessions_active,
+        "last_active": last_active,
+        "streak": streak,
+        "top_tools": top_tools,
+        "languages": langs,
+        "top_projects": [p["project"] for p in projects[:5]],
+    }
 
 
 def query_stats(conn: sqlite3.Connection, ignore_list: list[str]) -> dict:
@@ -432,6 +580,10 @@ def _build_profiles_html(profiles: list[dict]) -> str:
             else ""
         )
 
+        about_html = ""
+        if p.get("about"):
+            about_html = f'<div class="profile-about">{_html_escape(p["about"])}</div>'
+
         handoff_html = ""
         if p["handoff"]:
             handoff_html = f'<div class="handoff-block"><div class="handoff-label">HANDOFF</div><div class="handoff-text">{_html_escape(p["handoff"][:300])}</div></div>'
@@ -468,9 +620,87 @@ def _build_profiles_html(profiles: list[dict]) -> str:
         html += f"""<div class="profile-card">
 <div class="profile-header"><div class="profile-dot" style="background:{color}"></div><h3 class="profile-name">{_html_escape(p["name"])}</h3><span class="profile-count">{p["sessions"]}</span></div>
 <div class="tech-row">{tech}</div>
-{handoff_html}{topics_html}{files_html}{errors_html}
+{about_html}{handoff_html}{topics_html}{files_html}{errors_html}
 </div>"""
     return html
+
+
+def _build_developer_profile_html(dp: dict) -> str:
+    """Render the developer profile section."""
+    if not dp:
+        return ""
+
+    # Stat tiles
+    streak_val = dp["streak"]
+    streak_label = "day streak" if streak_val == 1 else "day streak"
+    peak = dp["peak_day"]
+    peak_sessions = peak["count"] if peak else 0
+    peak_day_str = peak["day"] if peak else "-"
+
+    tiles = [
+        ("streak", streak_val, streak_label),
+        ("active days", dp["active_days"], "with sessions"),
+        ("peak", peak_sessions, f"on {peak_day_str}" if peak else "no activity"),
+        ("top langs", len(dp["languages"]), "languages touched"),
+    ]
+    tiles_html = ""
+    for _key, val, sub in tiles:
+        tiles_html += f'<div class="dp-tile"><div class="dp-tile-num">{val}</div><div class="dp-tile-sub">{_html_escape(sub)}</div></div>'
+
+    # Languages
+    langs_html = ""
+    for lang in dp["languages"]:
+        langs_html += f'<span class="dp-lang">{_html_escape(lang)}</span>'
+    if not langs_html:
+        langs_html = '<span class="dp-empty">No language data yet</span>'
+
+    # Top tools
+    tools_html = ""
+    for t in dp["top_tools"]:
+        tools_html += f'<span class="dp-tool">{_html_escape(t)}</span>'
+    if not tools_html:
+        tools_html = '<span class="dp-empty">No tool data yet</span>'
+
+    # Preferences + practices
+    prefs_html = ""
+    for p in dp["preferences"]:
+        prefs_html += f'<div class="dp-pref-row"><span class="dp-pref-topic">{_html_escape(p["topic"])}</span><span class="dp-pref-content">{_html_escape(p["content"][:110])}</span></div>'
+    if not prefs_html:
+        prefs_html = (
+            '<div class="dp-empty">Preferences will appear as they are learned</div>'
+        )
+
+    practices_html = ""
+    for p in dp["practices"]:
+        practices_html += f'<div class="dp-pref-row"><span class="dp-pref-topic">{_html_escape(p["topic"])}</span><span class="dp-pref-content">{_html_escape(p["content"][:110])}</span></div>'
+    if not practices_html:
+        practices_html = (
+            '<div class="dp-empty">Practices will appear as they are learned</div>'
+        )
+
+    return f"""<div class="dp-card">
+<div class="dp-tiles">{tiles_html}</div>
+<div class="dp-row">
+  <div class="dp-col">
+    <div class="dp-label">Languages</div>
+    <div class="dp-chips">{langs_html}</div>
+  </div>
+  <div class="dp-col">
+    <div class="dp-label">Most-used tools</div>
+    <div class="dp-chips">{tools_html}</div>
+  </div>
+</div>
+<div class="dp-row">
+  <div class="dp-col">
+    <div class="dp-label">Preferences</div>
+    {prefs_html}
+  </div>
+  <div class="dp-col">
+    <div class="dp-label">Practices</div>
+    {practices_html}
+  </div>
+</div>
+</div>"""
 
 
 def _build_html(
@@ -485,6 +715,7 @@ def _build_html(
     patterns,
     profiles,
     activity,
+    developer_profile,
 ) -> str:
     durable_count = sum(1 for m in memories if m["durability"] == "durable")
     ephemeral_count = sum(1 for m in memories if m["durability"] == "ephemeral")
@@ -793,6 +1024,117 @@ body {{ font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:va
 .file-bar-fill {{ height:100%; border-radius:3px; }}
 .file-count {{ font-family:'JetBrains Mono',monospace; color:var(--text-muted); font-size:11px; min-width:28px; text-align:right; }}
 .err-line {{ font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--red); padding:3px 0; word-break:break-all; opacity:0.8; }}
+.profile-about {{
+    font-size:13px;
+    color:var(--text2);
+    line-height:1.55;
+    padding:12px 14px;
+    background:var(--surface2);
+    border-radius:8px;
+    margin-bottom:16px;
+}}
+
+/* ── Developer profile ── */
+.dp-card {{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:28px;
+    margin-bottom:48px;
+}}
+.dp-tiles {{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+    gap:16px;
+    margin-bottom:28px;
+}}
+.dp-tile {{
+    text-align:center;
+    padding:18px 12px;
+    background:var(--surface2);
+    border-radius:10px;
+    border:1px solid var(--border);
+}}
+.dp-tile-num {{
+    font-size:32px;
+    font-weight:800;
+    color:var(--accent);
+    line-height:1;
+    letter-spacing:-1px;
+}}
+.dp-tile-sub {{
+    font-size:11px;
+    color:var(--text-muted);
+    margin-top:6px;
+    font-weight:500;
+    letter-spacing:0.3px;
+}}
+.dp-row {{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:28px;
+    margin-bottom:20px;
+}}
+.dp-row:last-child {{ margin-bottom:0; }}
+.dp-col {{ min-width:0; }}
+.dp-label {{
+    font-size:11px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    color:var(--text-muted);
+    margin-bottom:10px;
+}}
+.dp-chips {{ display:flex; flex-wrap:wrap; gap:6px; }}
+.dp-lang, .dp-tool {{
+    padding:4px 11px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:500;
+    background:var(--surface2);
+    border:1px solid var(--border);
+    color:var(--text2);
+}}
+.dp-lang {{
+    background:rgba(37,99,235,0.08);
+    border-color:rgba(37,99,235,0.18);
+    color:var(--accent);
+}}
+.dp-tool {{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+}}
+.dp-pref-row {{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    padding:6px 0;
+    border-bottom:1px solid var(--border);
+    font-size:12px;
+}}
+.dp-pref-row:last-child {{ border-bottom:none; }}
+.dp-pref-topic {{
+    font-family:'JetBrains Mono',monospace;
+    color:var(--blue);
+    font-size:11px;
+    flex-shrink:0;
+}}
+.dp-pref-content {{
+    color:var(--text2);
+    flex:1;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}}
+.dp-empty {{
+    color:var(--text-muted);
+    font-size:12px;
+    font-style:italic;
+    padding:6px 0;
+}}
+@media (max-width:720px) {{
+    .dp-row {{ grid-template-columns:1fr; gap:20px; }}
+}}
 
 .empty-state {{ color:var(--text-muted); font-size:13px; font-style:italic; padding:20px 0; }}
 
@@ -879,6 +1221,11 @@ body {{ font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:va
 </div>
 
 <div class="container">
+
+<!-- Developer Profile -->
+<div class="section-heading">You, as your AI sees you.</div>
+<div class="section-desc">Synthesized from durable memories, file history, and session patterns &mdash; no extra LLM calls.</div>
+{_build_developer_profile_html(developer_profile)}
 
 <!-- Activity Heatmap -->
 <div class="section-heading">Activity</div>
@@ -1087,6 +1434,9 @@ def generate_html(output_path: Path) -> None:
     errors = query_errors(conn, ignore_list)
     patterns = query_patterns(conn)
     profiles = query_project_profiles(conn, ignore_list)
+    developer_profile = query_developer_profile(
+        conn, ignore_list, memories, activity, tools, projects
+    )
 
     conn.close()
 
@@ -1102,6 +1452,7 @@ def generate_html(output_path: Path) -> None:
         patterns,
         profiles,
         activity,
+        developer_profile,
     )
     output_path.write_text(html, encoding="utf-8")
     print(f"Dashboard generated: {output_path}")
