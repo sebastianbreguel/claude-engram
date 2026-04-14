@@ -84,11 +84,11 @@ Everything lives in `~/.claude/memory.db` (SQLite) and `~/.claude/patterns/` (ma
 ## CLI
 
 ```bash
-uv run ~/.claude/tools/memcapture.py --stats            # what claude-engram knows
-uv run ~/.claude/tools/memcapture.py --memories          # list learned memories
-uv run ~/.claude/tools/memcapture.py --forget "topic"    # delete a memory
-uv run ~/.claude/tools/memcapture.py -q "react"          # full-text search
-uv run ~/.claude/tools/memcapture.py --dashboard         # visual dashboard
+uv run ~/.claude/tools/engram.py stats              # what claude-engram knows
+uv run ~/.claude/tools/engram.py memories           # list learned memories
+uv run ~/.claude/tools/engram.py forget "topic"     # delete a memory
+uv run ~/.claude/tools/engram.py dashboard          # visual dashboard
+uv run ~/.claude/tools/engram.py patterns --report  # detected patterns
 ```
 
 ## Optional: pattern detection
@@ -96,8 +96,8 @@ uv run ~/.claude/tools/memcapture.py --dashboard         # visual dashboard
 claude-engram detects emergent patterns from your session history — file pairs you always edit together, recurring errors, and tool habits. Patterns are stored as an Obsidian-compatible wiki in `~/.claude/patterns/`.
 
 ```bash
-uv run ~/.claude/tools/mempatterns.py --report     # detected patterns
-uv run ~/.claude/tools/mempatterns.py --status     # wiki stats
+uv run ~/.claude/tools/engram.py patterns --report   # detected patterns
+uv run ~/.claude/tools/engram.py patterns --status   # wiki stats
 ```
 
 Use `/patterns` inside Claude Code to explore. Add substrings to `~/.claude/patterns/.ignore` to exclude noisy projects.
