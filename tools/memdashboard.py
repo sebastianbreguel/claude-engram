@@ -70,11 +70,9 @@ def _ignore_where_and(
 def query_activity_data(conn: sqlite3.Connection, ignore_list: list[str]) -> list[dict]:
     """Sessions per day for activity heatmap.
 
-    Uses transcript file mtime for the real session date when available,
-    falling back to captured_at (which may be bulk-import date).
+    Reads the first line of each JSONL transcript to get the real session
+    timestamp, falling back to captured_at for missing/unreadable files.
     """
-    import os
-
     where, params = _ignore_where(ignore_list)
     rows = conn.execute(
         f"SELECT transcript_path, captured_at FROM sessions{where}",
@@ -83,15 +81,26 @@ def query_activity_data(conn: sqlite3.Connection, ignore_list: list[str]) -> lis
 
     day_counts: Counter[str] = Counter()
     for r in rows:
-        tp = r["transcript_path"]
-        if tp and os.path.exists(tp):
-            mtime = os.path.getmtime(tp)
-            day = date.fromtimestamp(mtime).isoformat()
-        else:
-            day = r["captured_at"][:10]
+        day = _session_date(r["transcript_path"], r["captured_at"])
         day_counts[day] += 1
 
     return [{"day": d, "count": c} for d, c in sorted(day_counts.items())]
+
+
+def _session_date(transcript_path: str | None, fallback_ts: str) -> str:
+    """Extract the real session date from a JSONL transcript's first line."""
+    if transcript_path:
+        try:
+            with open(transcript_path) as f:
+                import json as _json
+
+                entry = _json.loads(f.readline())
+                ts = entry.get("timestamp", "")
+                if ts and len(ts) >= 10:
+                    return ts[:10]
+        except (OSError, ValueError, KeyError):
+            pass
+    return fallback_ts[:10]
 
 
 def query_projects(conn: sqlite3.Connection, ignore_list: list[str]) -> list[dict]:
