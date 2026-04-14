@@ -1,4 +1,4 @@
-# engram
+# Engram
 
 Persistent memory for Claude Code that **remembers what you prefer**, **hands off what you were doing**, and **detects how you actually work**.
 
