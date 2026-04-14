@@ -323,6 +323,98 @@ class MemoryDB:
             pass
         return []
 
+    @staticmethod
+    def _relative_time(timestamp: str | None) -> str:
+        """Short relative-time string: 'just now', '2h ago', '3d ago'."""
+        if not timestamp:
+            return "never"
+        try:
+            ts = timestamp.replace("T", " ").replace("Z", "").split(".")[0]
+            dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return "recently"
+        delta = datetime.now() - dt
+        secs = delta.total_seconds()
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            return f"{int(secs / 60)}m ago"
+        if secs < 86400:
+            return f"{int(secs / 3600)}h ago"
+        if secs < 86400 * 7:
+            return f"{int(secs / 86400)}d ago"
+        return f"{int(secs / 86400 / 7)}w ago"
+
+    def build_banner(
+        self, project: str | None = None, display_name: str | None = None
+    ) -> str:
+        """Compact banner for SessionStart systemMessage — shown between welcome box and prompt."""
+        if display_name:
+            project_name = display_name[:40]
+        elif project:
+            cleaned = project.rstrip("-").split("-")[-1] or project
+            project_name = cleaned[:40]
+        else:
+            project_name = "engram"
+
+        if project:
+            row = self.conn.execute(
+                "SELECT COUNT(*) as c, MAX(captured_at) as last FROM sessions WHERE project LIKE ?",
+                (f"%{project}%",),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT COUNT(*) as c, MAX(captured_at) as last FROM sessions"
+            ).fetchone()
+        session_count = row["c"] if row else 0
+        last_seen = self._relative_time(row["last"] if row else None)
+
+        pref_count = self.conn.execute(
+            "SELECT COUNT(*) as c FROM memories WHERE durability = 'durable'"
+        ).fetchone()["c"]
+
+        handoff_line = None
+        if project:
+            handoff_topic = "handoff_" + re.sub(
+                r"[^a-z0-9_]", "_", project.lower()
+            ).strip("_")
+            hrow = self.conn.execute(
+                "SELECT content FROM memories WHERE topic = ? LIMIT 1",
+                (handoff_topic,),
+            ).fetchone()
+            if hrow and hrow["content"]:
+                content = hrow["content"].strip().replace("\n", " ")
+                first_sentence = re.split(r"(?<=[.!?])\s+", content, maxsplit=1)[0]
+                handoff_line = first_sentence[:160]
+
+        use_color = (
+            os.environ.get("NO_COLOR", "") == ""
+            and os.environ.get("TERM", "") != "dumb"
+        )
+        if use_color:
+            C_RESET = "\033[0m"
+            C_BRAND = "\033[1;35m"
+            C_PROJ = "\033[1;36m"
+            C_NUM = "\033[1;33m"
+            C_DIM = "\033[90m"
+            C_HANDOFF = "\033[1;32m"
+            sep = f"{C_DIM}·{C_RESET}"
+            header = (
+                f"{C_BRAND}engram{C_RESET} {sep} "
+                f"{C_PROJ}{project_name}{C_RESET} {sep} "
+                f"{C_NUM}{session_count}{C_RESET} sessions {sep} "
+                f"last {C_NUM}{last_seen}{C_RESET} {sep} "
+                f"{C_NUM}{pref_count}{C_RESET} memories"
+            )
+            if handoff_line:
+                return f"{header}\n{C_HANDOFF}↳{C_RESET} {handoff_line}"
+            return header
+
+        header = f"engram · {project_name} · {session_count} sessions · last {last_seen} · {pref_count} memories"
+        if handoff_line:
+            return f"{header}\n↳ {handoff_line}"
+        return header
+
     def inject_context(self, project: str | None = None) -> str:
         """Generate ~350 token context block from learned memories + optional compaction snapshot."""
         self.cleanup_ephemeral()
@@ -927,6 +1019,9 @@ def main() -> None:
     parser.add_argument("--recent", type=int, metavar="N", help=argparse.SUPPRESS)
     parser.add_argument("--inject", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--inject-project", type=str, help=argparse.SUPPRESS)
+    parser.add_argument("--banner", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--banner-project", type=str, help=argparse.SUPPRESS)
+    parser.add_argument("--banner-name", type=str, help=argparse.SUPPRESS)
     parser.add_argument("--transcript", type=str, help=argparse.SUPPRESS)
     parser.add_argument(
         "--extract-facts",
@@ -1022,6 +1117,10 @@ def main() -> None:
 
         if args.inject:
             print(db.inject_context(args.inject_project))
+            return
+
+        if args.banner:
+            print(db.build_banner(args.banner_project, args.banner_name))
             return
 
         if args.ingest_digest:

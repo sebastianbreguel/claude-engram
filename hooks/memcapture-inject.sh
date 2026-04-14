@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# SessionStart hook — injects recent session context from SQLite (~200 tokens).
-# Reads from memory.db and outputs a small context block.
+# SessionStart hook — injects:
+#   - additionalContext (invisible, for Claude): learned memories, handoff, snapshot
+#   - systemMessage (visible to user, between welcome box and prompt): compact banner
+# Gated: banner only renders when ENGRAM_SHOW_BANNER=1 (default off).
 
 set -euo pipefail
 
 INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
 
-# Derive project key from cwd (Claude Code convention)
 PROJECT_KEY=""
 if [ -n "$CWD" ]; then
     PROJECT_KEY=$(echo "$CWD" | sed 's|/|-|g')
@@ -15,15 +16,35 @@ fi
 
 TOOL="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/tools/memcapture.py"
 
-# Generate inject context
 if [ -n "$PROJECT_KEY" ]; then
     CONTEXT=$(uv run "$TOOL" --inject --inject-project="$PROJECT_KEY" 2>/dev/null || true)
 else
     CONTEXT=$(uv run "$TOOL" --inject 2>/dev/null || true)
 fi
 
-if [ -n "$CONTEXT" ]; then
-    echo "$CONTEXT"
+BANNER=""
+if [ "${ENGRAM_SHOW_BANNER:-1}" = "1" ]; then
+    DISPLAY_NAME=""
+    if [ -n "$CWD" ]; then
+        DISPLAY_NAME=$(basename "$CWD")
+    fi
+    if [ -n "$PROJECT_KEY" ]; then
+        BANNER=$(uv run "$TOOL" --banner --banner-project="$PROJECT_KEY" --banner-name="$DISPLAY_NAME" 2>/dev/null || true)
+    else
+        BANNER=$(uv run "$TOOL" --banner 2>/dev/null || true)
+    fi
 fi
+
+jq -n \
+    --arg ctx "$CONTEXT" \
+    --arg banner "$BANNER" \
+    '{
+        continue: true,
+        suppressOutput: true,
+        hookSpecificOutput: {
+            hookEventName: "SessionStart",
+            additionalContext: $ctx
+        }
+    } + (if $banner == "" then {} else {systemMessage: $banner} end)'
 
 exit 0
