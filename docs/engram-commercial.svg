@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" font-family="-apple-system, Inter, Helvetica, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1400" height="820" fill="url(#bg)"/>
+
+  <!-- HEADER -->
+  <text x="700" y="85" font-size="72" font-weight="800" text-anchor="middle" fill="#0f172a" letter-spacing="-2">engram</text>
+  <text x="700" y="130" font-size="22" text-anchor="middle" fill="#475569">Claude Code that remembers how you work</text>
+  <line x1="670" y1="155" x2="730" y2="155" stroke="#4f46e5" stroke-width="3"/>
+
+  <!-- 3-STEP FLOW -->
+  <g font-family="-apple-system, Inter, Helvetica, sans-serif">
+    <!-- Step 1 -->
+    <rect x="60" y="220" width="380" height="150" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="100" cy="260" r="22" fill="#4f46e5"/>
+    <text x="100" y="267" font-size="16" font-weight="700" text-anchor="middle" fill="#ffffff">1</text>
+    <text x="140" y="265" font-size="19" font-weight="600" fill="#0f172a">You work with Claude</text>
+    <text x="140" y="300" font-size="14" fill="#64748b">Edit code. Debug. Run tests.</text>
+    <text x="140" y="322" font-size="14" fill="#64748b">Nothing changes in your flow.</text>
+    <text x="140" y="352" font-size="12" fill="#94a3b8">zero-config · zero-overhead</text>
+
+    <!-- arrow -->
+    <line x1="450" y1="295" x2="510" y2="295" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- Step 2 -->
+    <rect x="520" y="220" width="380" height="150" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="560" cy="260" r="22" fill="#10b981"/>
+    <text x="560" y="267" font-size="16" font-weight="700" text-anchor="middle" fill="#ffffff">2</text>
+    <text x="600" y="265" font-size="19" font-weight="600" fill="#0f172a">engram learns in background</text>
+    <text x="600" y="300" font-size="14" fill="#64748b">Captures preferences, files,</text>
+    <text x="600" y="322" font-size="14" fill="#64748b">and what you were doing.</text>
+    <text x="600" y="352" font-size="12" fill="#94a3b8">runs on compact · no API keys</text>
+
+    <!-- arrow -->
+    <line x1="910" y1="295" x2="970" y2="295" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- Step 3 -->
+    <rect x="980" y="220" width="360" height="150" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="1020" cy="260" r="22" fill="#f59e0b"/>
+    <text x="1020" y="267" font-size="16" font-weight="700" text-anchor="middle" fill="#ffffff">3</text>
+    <text x="1060" y="265" font-size="19" font-weight="600" fill="#0f172a">Claude already knows you</text>
+    <text x="1060" y="300" font-size="14" fill="#64748b">Next session opens with your</text>
+    <text x="1060" y="322" font-size="14" fill="#64748b">preferences and a handoff note.</text>
+    <text x="1060" y="352" font-size="12" fill="#94a3b8">~350 tokens · per-project</text>
+  </g>
+
+  <!-- SECTION HEADER -->
+  <text x="700" y="430" font-size="26" font-weight="700" text-anchor="middle" fill="#0f172a">Three things it remembers for you</text>
+
+  <!-- PILLAR 1: PREFERENCES -->
+  <g>
+    <rect x="60" y="470" width="410" height="210" rx="14" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+    <rect x="60" y="470" width="6" height="210" fill="#4f46e5" rx="3"/>
+    <text x="90" y="510" font-size="22" font-weight="700" fill="#4f46e5">Preferences</text>
+    <text x="90" y="542" font-size="15" font-weight="500" fill="#1e293b">How you like to work.</text>
+    <text x="90" y="578" font-size="13.5" fill="#64748b" font-style="italic">"uses uv, not pip · prefers Spanish</text>
+    <text x="90" y="600" font-size="13.5" fill="#64748b" font-style="italic">terse responses · no docstrings"</text>
+    <text x="90" y="645" font-size="13" font-weight="600" fill="#4f46e5">Saved once. Never re-explained.</text>
+  </g>
+
+  <!-- PILLAR 2: HANDOFFS -->
+  <g>
+    <rect x="495" y="470" width="410" height="210" rx="14" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+    <rect x="495" y="470" width="6" height="210" fill="#10b981" rx="3"/>
+    <text x="525" y="510" font-size="22" font-weight="700" fill="#059669">Handoffs</text>
+    <text x="525" y="542" font-size="15" font-weight="500" fill="#1e293b">What you were doing.</text>
+    <text x="525" y="578" font-size="13.5" fill="#64748b" font-style="italic">"was refactoring auth to JWT;</text>
+    <text x="525" y="600" font-size="13.5" fill="#64748b" font-style="italic">signup still on old sessions."</text>
+    <text x="525" y="645" font-size="13" font-weight="600" fill="#059669">A note from yesterday-you.</text>
+  </g>
+
+  <!-- PILLAR 3: PATTERNS -->
+  <g>
+    <rect x="930" y="470" width="410" height="210" rx="14" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+    <rect x="930" y="470" width="6" height="210" fill="#d97706" rx="3"/>
+    <text x="960" y="510" font-size="22" font-weight="700" fill="#b45309">Patterns</text>
+    <text x="960" y="542" font-size="15" font-weight="500" fill="#1e293b">How you actually work.</text>
+    <text x="960" y="578" font-size="13.5" fill="#64748b" font-style="italic">files always edited together,</text>
+    <text x="960" y="600" font-size="13.5" fill="#64748b" font-style="italic">recurring errors, tool habits.</text>
+    <text x="960" y="645" font-size="13" font-weight="600" fill="#b45309">Browseable wiki. You stay in control.</text>
+  </g>
+
+  <!-- TRUST STRIP -->
+  <rect x="60" y="720" width="1280" height="54" rx="10" fill="#0f172a"/>
+  <text x="700" y="754" font-size="15" text-anchor="middle" fill="#e2e8f0" letter-spacing="0.5">
+    ~350 tokens ambient  ·  100% local  ·  no API keys  ·  no Docker  ·  no MCP overhead  ·  one-line install
+  </text>
+
+  <!-- FOOTER -->
+  <text x="60" y="800" font-size="11" fill="#94a3b8">sebastianbreguel/engram  ·  MIT  ·  Claude Code plugin  ·  /plugin install engram@sebastianbreguel/engram</text>
+</svg>

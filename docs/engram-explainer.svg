@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" font-family="-apple-system, Inter, Helvetica, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6366f1"/>
+    </marker>
+    <marker id="arrGray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="720" fill="#ffffff"/>
+
+  <!-- header -->
+  <text x="60" y="75" font-size="42" font-weight="700" fill="#0f172a" letter-spacing="-1">engram</text>
+  <text x="60" y="105" font-size="16" fill="#64748b">session memory for Claude Code — keeps the useful bits, drops the rest</text>
+
+  <!-- three sessions (timeline) -->
+  <text x="60" y="170" font-size="11" font-weight="600" fill="#94a3b8" letter-spacing="1.5">CLAUDE SESSIONS OVER TIME</text>
+
+  <!-- session 1 -->
+  <rect x="60" y="190" width="280" height="110" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="80" y="215" font-size="12" font-weight="600" fill="#475569">session 1 · monday</text>
+  <text x="80" y="240" font-size="13" fill="#334155">"refactor auth to use JWT"</text>
+  <text x="80" y="260" font-size="12" fill="#64748b" font-style="italic">uses uv · responds in Spanish</text>
+  <text x="80" y="280" font-size="12" fill="#64748b" font-style="italic">edits auth.py + middleware.py</text>
+
+  <!-- session 2 -->
+  <rect x="460" y="190" width="280" height="110" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="480" y="215" font-size="12" font-weight="600" fill="#475569">session 2 · wednesday</text>
+  <text x="480" y="240" font-size="13" fill="#334155">"finish the signup flow"</text>
+  <text x="480" y="260" font-size="12" fill="#64748b" font-style="italic">same uv · same Spanish · already</text>
+  <text x="480" y="280" font-size="12" fill="#64748b" font-style="italic">knows auth is mid-refactor</text>
+
+  <!-- session 3 -->
+  <rect x="860" y="190" width="280" height="110" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+  <text x="880" y="215" font-size="12" font-weight="600" fill="#4f46e5">session 3 · today</text>
+  <text x="880" y="240" font-size="13" fill="#1e293b">"what was I doing again?"</text>
+  <text x="880" y="260" font-size="12" fill="#4f46e5" font-style="italic">claude opens with yesterday's</text>
+  <text x="880" y="280" font-size="12" fill="#4f46e5" font-style="italic">handoff + your prefs. just works.</text>
+
+  <!-- arrows down to db (capture) -->
+  <line x1="200" y1="300" x2="200" y2="380" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrGray)"/>
+  <line x1="600" y1="300" x2="600" y2="380" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrGray)"/>
+  <text x="215" y="345" font-size="11" fill="#64748b" font-style="italic">capture on compact</text>
+  <text x="615" y="345" font-size="11" fill="#64748b" font-style="italic">capture on compact</text>
+
+  <!-- arrow from db up to session 3 (inject) -->
+  <path d="M 720 400 Q 900 320 990 305" fill="none" stroke="#6366f1" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="940" y="380" font-size="11" font-weight="600" fill="#4f46e5" text-anchor="end">inject on startup · ~350 tokens</text>
+
+  <!-- db box -->
+  <rect x="60" y="400" width="640" height="200" rx="8" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+  <text x="80" y="430" font-size="13" font-weight="700" fill="#0f172a">memory.db</text>
+  <text x="150" y="430" font-size="12" fill="#64748b">local SQLite · lives in ~/.claude/ · you own it</text>
+
+  <!-- three things it stores, concrete -->
+  <line x1="80" y1="445" x2="680" y2="445" stroke="#e2e8f0"/>
+
+  <text x="80" y="470" font-size="12" font-weight="700" fill="#4f46e5">prefs</text>
+  <text x="140" y="470" font-size="12" fill="#334155">→ "uses uv, not pip", "responds in Spanish", "no docstrings"</text>
+  <text x="140" y="488" font-size="11" fill="#94a3b8" font-style="italic">saved once. never re-explained.</text>
+
+  <text x="80" y="518" font-size="12" font-weight="700" fill="#059669">handoff</text>
+  <text x="140" y="518" font-size="12" fill="#334155">→ "was refactoring auth to JWT; signup still on old sessions"</text>
+  <text x="140" y="536" font-size="11" fill="#94a3b8" font-style="italic">a note from yesterday-you, one paragraph.</text>
+
+  <text x="80" y="566" font-size="12" font-weight="700" fill="#b45309">patterns</text>
+  <text x="140" y="566" font-size="12" fill="#334155">→ auth.py + middleware.py always edited together; tends to hit TypeError</text>
+  <text x="140" y="584" font-size="11" fill="#94a3b8" font-style="italic">emergent, browseable as markdown wiki.</text>
+
+  <!-- right side: the mechanism in one line -->
+  <rect x="730" y="400" width="410" height="200" rx="8" fill="#0f172a"/>
+  <text x="755" y="432" font-size="13" font-weight="700" fill="#e2e8f0" letter-spacing="1">HOW</text>
+
+  <text x="755" y="465" font-size="12" fill="#cbd5e1">1.</text>
+  <text x="775" y="465" font-size="12" fill="#e2e8f0">claude-code fires PreCompact hook</text>
+
+  <text x="755" y="490" font-size="12" fill="#cbd5e1">2.</text>
+  <text x="775" y="490" font-size="12" fill="#e2e8f0">one LLM pass digests the session</text>
+
+  <text x="755" y="515" font-size="12" fill="#cbd5e1">3.</text>
+  <text x="775" y="515" font-size="12" fill="#e2e8f0">writes facts + handoff into sqlite</text>
+
+  <text x="755" y="540" font-size="12" fill="#cbd5e1">4.</text>
+  <text x="775" y="540" font-size="12" fill="#e2e8f0">SessionStart injects relevant bits</text>
+
+  <text x="755" y="580" font-size="11" fill="#64748b" font-style="italic">that's it. shell hooks + python + sqlite.</text>
+
+  <!-- footer: the numbers that matter -->
+  <line x1="60" y1="640" x2="1140" y2="640" stroke="#e2e8f0"/>
+  <text x="60" y="670" font-size="13" fill="#475569">
+    <tspan font-weight="700" fill="#0f172a">~350</tspan> ambient tokens  ·
+    <tspan font-weight="700" fill="#0f172a">0</tspan> api keys  ·
+    <tspan font-weight="700" fill="#0f172a">0</tspan> docker  ·
+    <tspan font-weight="700" fill="#0f172a">0</tspan> mcp servers  ·
+    runs on the <tspan font-family="Menlo, monospace" fill="#0f172a">claude --print</tspan> you already have
+  </text>
+  <text x="60" y="695" font-size="11" fill="#94a3b8" font-family="Menlo, monospace">sebastianbreguel/engram  ·  /plugin install engram@sebastianbreguel/engram</text>
+</svg>

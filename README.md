@@ -141,6 +141,10 @@ When a session starts, engram injects memories scoped to where you are:
 
 Open `vambe-datascience` and you get vambe context; switch to `engram` and you get engram context. Preferences like language and code style follow you everywhere.
 
+## At a glance
+
+![engram — session memory for Claude Code](docs/engram-explainer.svg)
+
 ## Docs
 
 - [CLI Reference](docs/cli-reference.md) — all commands, token budget, manual install, experimental features
