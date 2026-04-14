@@ -99,17 +99,29 @@ def query_activity_data(conn: sqlite3.Connection, ignore_list: list[str]) -> lis
 
 
 def _session_date(transcript_path: str | None, fallback_ts: str) -> str:
-    """Extract the real session date from a JSONL transcript's first line."""
+    """Extract the real session date from a JSONL transcript.
+
+    Scans the first few lines since metadata entries (permission-mode,
+    file-history-snapshot) don't have timestamps — we need the first
+    message-type entry.
+    """
     if transcript_path:
         try:
             with open(transcript_path) as f:
                 import json as _json
 
-                entry = _json.loads(f.readline())
-                ts = entry.get("timestamp", "")
-                if ts and len(ts) >= 10:
-                    return ts[:10]
-        except (OSError, ValueError, KeyError):
+                for _ in range(10):  # scan up to 10 lines
+                    line = f.readline()
+                    if not line:
+                        break
+                    try:
+                        entry = _json.loads(line)
+                    except ValueError:
+                        continue
+                    ts = entry.get("timestamp", "")
+                    if ts and len(ts) >= 10:
+                        return ts[:10]
+        except OSError:
             pass
     return fallback_ts[:10]
 
