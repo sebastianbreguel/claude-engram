@@ -1,15 +1,30 @@
 # engram
 
-Give Claude Code persistent memory that learns from your sessions — what you prefer, what worked, what's in progress.
+Persistent memory for Claude Code that **remembers what you prefer**, **hands off what you were doing**, and **detects how you actually work**.
 
 **~350 tokens ambient cost.** No Docker, no API keys, no MCP servers.
 
 ```
 $ uv run ~/.claude/tools/memcapture.py --stats
-Sessions captured: 2347
-Unique files touched: 1486
-Facts by type: {'correction': 75, 'decision': 64, 'error': 361}
+engram — what I've learned about you
+
+  2353 sessions captured, 38 patterns detected
+  1548 unique files touched
+     3 preferences remembered
+     2 context notes active
+
+Most active projects:
+  • vambe-datascience    49 sessions
+  • IconicPersonalities  24 sessions
 ```
+
+## What makes engram different
+
+Most memory tools store your history. engram goes further:
+
+- **Per-project handoff** — at session start, you get a narrative note from the last session in this project: *"We were refactoring auth to JWT; signup still on old sessions. Next: wire signup to JWT."* Not a JSON dump. A message from yesterday-you.
+- **Emergent pattern detection** — engram notices what you don't. Files you always edit together, tools you use 3x more than average in one project, recurring errors. Stored as an auditable wiki you can browse.
+- **Atomic UPSERT memories** — preferences are facts with a topic key. Same topic = one row, latest wins. No contradictions, no drift, no embeddings.
 
 ## How it works
 
