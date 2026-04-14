@@ -516,8 +516,8 @@ class MemoryDB:
 
         return output
 
-    def _format_snapshot(self, snapshot_json: str) -> str:
-        """Format a compaction snapshot as an injection block."""
+    def _format_snapshot(self, snapshot_json: str, max_chars: int = 600) -> str:
+        """Format a compaction snapshot as an injection block (capped to ~150 tokens)."""
         try:
             data = json.loads(snapshot_json)
         except (json.JSONDecodeError, TypeError):
@@ -525,18 +525,19 @@ class MemoryDB:
 
         lines = ["<compaction-snapshot>"]
         if data.get("task"):
-            lines.append(f"Resuming: {data['task']}")
+            lines.append(f"Resuming: {data['task'][:120]}")
         if data.get("files"):
             files = (
                 data["files"] if isinstance(data["files"], list) else [data["files"]]
             )
-            lines.append(f"Files in progress: {', '.join(str(f) for f in files)}")
+            lines.append(f"Files in progress: {', '.join(str(f) for f in files[:5])}")
         if data.get("last_error"):
-            lines.append(f"Last error: {data['last_error']}")
+            lines.append(f"Last error: {data['last_error'][:120]}")
         if data.get("summary"):
-            lines.append(f"Context: {data['summary']}")
+            lines.append(f"Context: {data['summary'][:200]}")
         lines.append("</compaction-snapshot>")
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        return result[:max_chars]
 
     def _fallback_inject(self, project: str | None = None) -> str:
         """Generate ~200 token context block for SessionStart injection (v1 fallback)."""

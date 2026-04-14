@@ -1,87 +1,43 @@
 # Claude-engram
 
-Persistent memory for Claude Code that **remembers what you prefer**, **hands off what you were doing**, and **detects how you actually work**.
+**Claude forgets everything between sessions.** Your preferences, your project state, where you left off — gone the moment you close the terminal.
 
-**~350 tokens ambient cost.** No Docker, no API keys, no MCP servers.
+claude-engram fixes that. **~350 ambient tokens. No Docker, no API keys, no MCP.**
+
+## What you see
+
+When you open Claude Code, claude-engram injects a short note from your last session:
 
 ```
-$ uv run ~/.claude/tools/memcapture.py --stats
-engram — what I've learned about you
+Learned preferences & practices:
+- User prefers uv, never pip — responds in Spanish
+- Terse responses, no docstrings unless asked
 
-  2353 sessions captured, 38 patterns detected
-  1548 unique files touched
-     3 preferences remembered
-     2 context notes active
-
-Most active projects:
-  • vambe-datascience    49 sessions
-  • IconicPersonalities  24 sessions
+Current context:
+- Was refactoring auth to JWT; signup still on old sessions
+- Next: wire signup to JWT flow
 ```
 
-## What makes engram different
-
-Most memory tools store your history. engram goes further:
-
-- **Per-project handoff** — at session start, you get a narrative note from the last session in this project: *"We were refactoring auth to JWT; signup still on old sessions. Next: wire signup to JWT."* Not a JSON dump. A message from yesterday-you.
-- **Emergent pattern detection** — engram notices what you don't. Files you always edit together, tools you use 3x more than average in one project, recurring errors. Stored as an auditable wiki you can browse.
-- **Atomic UPSERT memories** — preferences are facts with a topic key. Same topic = one row, latest wins. No contradictions, no drift, no embeddings.
+Claude picks up where you left off. No re-explaining.
 
 ## How it works
 
-```
-  Open Claude Code ──► Work normally ──► Context compacts
-       │                                        │
-       │ Reads:                      PreCompact fires (automatic):
-       │ • <session-memory> block       ┌──────┼──────┬──────────┐
-       │   (~350 tokens, scoped         │      │      │          │
-       │    to current project)   memcapture  memdigest  mempatterns
-       │                         (structural) (LLM ext.) (emergent
-       │                          zero-cost  ~2-5K tok)   patterns)
-       │                              │         │            │
-       │                              ▼         ▼            ▼
-  Next session starts ◄── SessionStart ◄── ~/.claude/memory.db ─► ~/.claude/patterns/
-       │                  inject: durable=global,    (SQLite)     (Obsidian wiki)
-       │                  ephemeral+snapshot=per-project
-       ▼
-  Claude knows how you work in THIS project
-```
+claude-engram has two jobs: **remember** and **inject**.
 
-1. **Capture** — on every context compaction, `memcapture.py` parses the JSONL transcript and extracts errors, files touched, tool usage, and session topics into SQLite
-2. **Learn** — `memdigest-hook.sh` sends the last ~20% of the transcript to Claude, which extracts atomic memories: preferences, lessons, practices, and project state
-3. **Inject** — at session start, ~350 tokens of learned memories are injected so Claude knows how you work
+1. **On compaction** — one background LLM pass reads your session and extracts atomic memories: preferences, project state, and a handoff paragraph. Stored in local SQLite, keyed by topic (same topic = one row, latest wins, no contradictions).
+2. **On session start** — ~350 tokens of what matters are injected, scoped to your current project. Preferences follow you everywhere; project state stays local and expires in 7 days.
 
-Memories are stored as atomic facts with a **topic key** — same topic always has one row, latest wins, no contradictions. Preferences persist indefinitely; project state expires in 7 days.
+That's the core. No config, no commands to run. It works while you work.
 
-## Why this exists
+## What it remembers
 
-Most Claude Code memory tools add significant ambient token cost, require external services, or install MCP servers with many tool descriptions. engram takes the best ideas and keeps it lightweight:
+| | What | Example | Lifetime |
+|---|---|---|---|
+| **Handoffs** | Where you left off | *"Refactoring auth to JWT; signup still on old sessions"* | 7 days |
+| **Preferences** | How you like to work | *"uses uv, not pip · responds in Spanish"* | Forever |
+| **Patterns** | How you actually work | *files always edited together, recurring errors* | Updated on each session |
 
-| Source | What we took | What we skipped |
-|---|---|---|
-| [claude-mem](https://github.com/thedotmack/claude-mem) | Auto-capture concept | LLM worker, Agent SDK, web viewer |
-| [claude-memory-compiler](https://github.com/coleam00/claude-memory-compiler) | compile.py architecture | SessionEnd hooks, ambient injection |
-| [OpenMemory](https://github.com/CaviraOSS/OpenMemory) | Temporal decay concept | Docker, MCP server, dashboard |
-| [cortex](https://github.com/gambletan/cortex) | Token-budget concept | 27 MCP tools, Rust binary |
-
-### How it compares
-
-| | engram | claude-mem | OpenMemory | cortex |
-|---|---|---|---|---|
-| Ambient token cost | **~350** | ~2K+ | ~1K+ (MCP) | ~3K (27 tools) |
-| External services | None | Agent SDK worker | Docker + MCP server | MCP server |
-| API keys required | No | Yes | No | No |
-| Runtime | Python + SQLite | Node worker | Docker | Rust binary |
-| Install | `./install.sh` | npm + worker | docker compose | cargo |
-
-## What engram stores (and where)
-
-Transparency matters when a tool reads your Claude history:
-
-- **Location**: everything lives in `~/.claude/memory.db` (SQLite) and `~/.claude/patterns/` (markdown). Nothing leaves your machine.
-- **What's captured**: session metadata (project, branch, topic), files touched, tool usage counts, error strings, and LLM-extracted atomic memories (preferences, practices, current context).
-- **What's NOT captured**: no full transcripts, no code content, no secrets from `.env`. Only structural facts and summarized memories.
-- **LLM calls**: only the `memdigest-hook.sh` sends a window of your transcript to Claude for extraction on compact (~2-5K tokens, local to your Claude Code session).
-- **Uninstall**: `./uninstall.sh` removes tools and hooks. Your `memory.db` is preserved unless you delete it manually.
+Handoffs and preferences are the core — they inject automatically on every session start. Patterns are a bonus: an Obsidian-compatible wiki in `~/.claude/patterns/` that detects file co-edits, recurring errors, and tool habits from your history. Browse it, ignore it, or use `/patterns` inside Claude Code to explore.
 
 ## Install
 
@@ -91,59 +47,74 @@ Transparency matters when a tool reads your Claude history:
 
 ```bash
 # In Claude Code:
-/plugin install engram@sebastianbreguel/engram
+/plugin install claude-engram@sebastianbreguel/claude-engram
 ```
 
 **Or clone and run the installer:**
 
 ```bash
-git clone https://github.com/sebastianbreguel/engram.git
-cd engram && ./install.sh
+git clone https://github.com/sebastianbreguel/claude-engram.git
+cd claude-engram && ./install.sh
 ```
-
-The installer copies tools, hooks, and skills to `~/.claude/`, wires hooks into `settings.json`, and runs initial capture.
 
 ```bash
 # Uninstall (keeps your memory.db data)
-cd engram && ./uninstall.sh
+cd claude-engram && ./uninstall.sh
 ```
 
-## Quick reference
+## How it compares
+
+| | claude-engram | claude-mem | OpenMemory | cortex |
+|---|---|---|---|---|
+| Ambient token cost | **~350** | ~2K+ | ~1K+ (MCP) | ~3K (27 tools) |
+| External services | None | Agent SDK worker | Docker + MCP server | MCP server |
+| API keys required | No | Yes | No | No |
+| Runtime | Python + SQLite | Node worker | Docker | Rust binary |
+| Install | `./install.sh` | npm + worker | docker compose | cargo |
+
+## Privacy and transparency
+
+Everything lives in `~/.claude/memory.db` (SQLite) and `~/.claude/patterns/` (markdown). Nothing leaves your machine.
+
+- **Captured**: session metadata, files touched, tool usage, error strings, and LLM-extracted memories.
+- **NOT captured**: no full transcripts, no code content, no secrets from `.env`.
+- **LLM calls**: one `claude --print` pass on compaction (~2-5K tokens, local to your session). No external API calls.
+- **Uninstall**: `./uninstall.sh` removes tools and hooks. Your data is preserved unless you delete it.
+
+## CLI
 
 ```bash
-uv run ~/.claude/tools/memcapture.py --stats            # global statistics
-uv run ~/.claude/tools/memcapture.py -q "react"         # full-text search
+uv run ~/.claude/tools/memcapture.py --stats            # what claude-engram knows
 uv run ~/.claude/tools/memcapture.py --memories          # list learned memories
 uv run ~/.claude/tools/memcapture.py --forget "topic"    # delete a memory
-uv run ~/.claude/tools/memcapture.py --dashboard         # open visual dashboard
+uv run ~/.claude/tools/memcapture.py -q "react"          # full-text search
+uv run ~/.claude/tools/memcapture.py --dashboard         # visual dashboard
 ```
 
-## Pattern detection
+## Optional: pattern detection
 
-engram detects emergent patterns from your session history — file pairs you always edit together, recurring errors, project streaks, and tool anomalies. Patterns are stored as an Obsidian-compatible wiki in `~/.claude/patterns/`.
+claude-engram detects emergent patterns from your session history — file pairs you always edit together, recurring errors, and tool habits. Patterns are stored as an Obsidian-compatible wiki in `~/.claude/patterns/`.
 
 ```bash
-uv run ~/.claude/tools/mempatterns.py --report     # show detected patterns
+uv run ~/.claude/tools/mempatterns.py --report     # detected patterns
 uv run ~/.claude/tools/mempatterns.py --status     # wiki stats
 ```
 
-Use `/patterns` inside Claude Code to explore patterns and discuss skill suggestions.
+Use `/patterns` inside Claude Code to explore. Add substrings to `~/.claude/patterns/.ignore` to exclude noisy projects.
 
-**Ignoring projects:** add substrings to `~/.claude/patterns/.ignore` (one per line) to exclude projects from pattern detection. Useful for noisy repos you don't care to analyze.
+## Per-project scoping
 
-## Per-project memory
+claude-engram injects memories scoped to where you are:
 
-When a session starts, engram injects memories scoped to where you are:
+- **Durable** (preferences, practices) — global, appear in any project
+- **Ephemeral** (project state, handoffs) — scoped to the current project's cwd
+- **Snapshots** — the last work-state snapshot, injected only for the matching project
 
-- **Durable memories** (preferences, practices) — global, appear in any project
-- **Ephemeral memories** (current context, work state) — prioritized for the current project's cwd
-- **Compaction snapshots** — the last work-state snapshot is injected only for the matching project
-
-Open `vambe-datascience` and you get vambe context; switch to `engram` and you get engram context. Preferences like language and code style follow you everywhere.
+Open `vambe-datascience` and you get vambe context. Switch to `claude-engram` and you get claude-engram context.
 
 ## At a glance
 
-![engram — session memory for Claude Code](docs/engram-explainer.svg)
+![claude-engram — session memory for Claude Code](docs/claude-engram-explainer.svg)
 
 ## Docs
 

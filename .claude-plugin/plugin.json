@@ -1,8 +1,8 @@
 {
-  "name": "engram",
+  "name": "claude-engram",
   "description": "Persistent memory for Claude Code: per-project handoff notes, learned preferences, and emergent pattern detection. ~350 tokens ambient cost, no Docker, no API keys, no MCP.",
   "version": "0.1.0",
   "author": "Sebastian Breguel",
-  "homepage": "https://github.com/sebastianbreguel/engram",
+  "homepage": "https://github.com/sebastianbreguel/claude-engram",
   "license": "MIT"
 }

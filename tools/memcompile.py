@@ -12,7 +12,7 @@ Usage:
 """
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["anthropic"]
+# dependencies = []
 # ///
 
 from __future__ import annotations
@@ -147,37 +147,41 @@ def lint_memories(memories: list[dict[str, str]]) -> str:
 
 
 def compile_concepts(memories: list[dict[str, str]]) -> str:
-    """Use Claude to extract cross-project concepts from memories."""
-    import anthropic
+    """Use claude CLI to extract cross-project concepts from memories."""
+    import shutil
+    import subprocess
 
-    client = anthropic.Anthropic()
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        return (
+            "# Compilation skipped\n`claude` CLI not found. Install Claude Code first."
+        )
 
     memory_text = "\n\n---\n\n".join(
         f"**Project:** {m.get('_project', '?')} | **Type:** {m.get('type', '?')} | **Name:** {m.get('name', '?')}\n{m.get('body', '')}"
         for m in memories
     )
 
-    response = client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=4096,
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Analyze these memory files from multiple Claude Code projects. Extract:
-
-1. **Concepts** — recurring themes, technologies, patterns, preferences that appear across 2+ projects
-2. **Connections** — relationships between projects (shared tech, similar patterns, dependencies)
-
-Format as markdown with two sections. Be concise — one line per concept/connection. Only include things that appear in multiple projects or are clearly important decisions.
-
-<memories>
-{memory_text}
-</memories>""",
-            }
-        ],
+    prompt = (
+        "Analyze these memory files from multiple Claude Code projects. Extract:\n"
+        "1. **Concepts** — recurring themes, technologies, patterns, preferences that appear across 2+ projects\n"
+        "2. **Connections** — relationships between projects (shared tech, similar patterns, dependencies)\n\n"
+        "Format as markdown with two sections. Be concise — one line per concept/connection. "
+        "Only include things that appear in multiple projects or are clearly important decisions."
     )
 
-    return f"# Compiled Knowledge\n**Generated:** {datetime.now():%Y-%m-%d %H:%M}\n\n{response.content[0].text}"
+    result = subprocess.run(
+        [claude_path, "--print", "-p", prompt],
+        input=memory_text,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    if result.returncode != 0 or not result.stdout.strip():
+        return f"# Compilation failed\n{result.stderr[:500] if result.stderr else 'No output from claude CLI'}"
+
+    return f"# Compiled Knowledge\n**Generated:** {datetime.now():%Y-%m-%d %H:%M}\n\n{result.stdout}"
 
 
 def main() -> None:
@@ -216,8 +220,8 @@ def main() -> None:
         print("Too few memories for meaningful compilation. Run --lint-only instead.")
         return
 
-    # Compile concepts via LLM
-    print("Compiling concepts via Claude...")
+    # Compile concepts via claude CLI (no API key needed)
+    print("Compiling concepts via claude CLI...")
     compiled = compile_concepts(memories)
     (OUTPUT_DIR / "concepts.md").write_text(compiled, encoding="utf-8")
     print(f"Concepts → {OUTPUT_DIR / 'concepts.md'}")

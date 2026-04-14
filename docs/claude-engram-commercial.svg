@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 860" font-family="-apple-system, Inter, Helvetica, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1400" height="860" fill="url(#bg)"/>
+
+  <!-- HEADER -->
+  <text x="700" y="90" font-size="60" font-weight="800" text-anchor="middle" fill="#0f172a" letter-spacing="-2">claude-engram</text>
+  <text x="700" y="135" font-size="22" text-anchor="middle" fill="#475569">Claude Code that picks up where you left off.</text>
+  <line x1="670" y1="160" x2="730" y2="160" stroke="#4f46e5" stroke-width="3"/>
+
+  <!-- PROBLEM / SOLUTION / OUTCOME -->
+  <text x="700" y="210" font-size="13" font-weight="700" letter-spacing="2.5" text-anchor="middle" fill="#94a3b8">THE STORY IN THREE FRAMES</text>
+
+  <!-- Frame 1: Problem -->
+  <g>
+    <rect x="60" y="235" width="400" height="170" rx="14" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
+    <rect x="60" y="235" width="6" height="170" fill="#dc2626" rx="3"/>
+    <text x="90" y="275" font-size="13" font-weight="700" letter-spacing="1.5" fill="#dc2626">THE PROBLEM</text>
+    <text x="90" y="315" font-size="22" font-weight="700" fill="#7f1d1d">Claude forgets.</text>
+    <text x="90" y="348" font-size="14.5" fill="#475569">Every new session starts from zero —</text>
+    <text x="90" y="370" font-size="14.5" fill="#475569">your prefs, your context, where you</text>
+    <text x="90" y="392" font-size="14.5" fill="#475569">left off. All gone.</text>
+  </g>
+
+  <polygon points="475,305 505,320 475,335" fill="#94a3b8"/>
+
+  <!-- Frame 2: Solution -->
+  <g>
+    <rect x="520" y="235" width="360" height="170" rx="14" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1.5"/>
+    <rect x="520" y="235" width="6" height="170" fill="#4f46e5" rx="3"/>
+    <text x="550" y="275" font-size="13" font-weight="700" letter-spacing="1.5" fill="#4f46e5">THE FIX</text>
+    <text x="550" y="315" font-size="22" font-weight="700" fill="#312e81">claude-engram remembers.</text>
+    <text x="550" y="348" font-size="14.5" fill="#475569">Quietly, in the background. Learns</text>
+    <text x="550" y="370" font-size="14.5" fill="#475569">your preferences, your project state,</text>
+    <text x="550" y="392" font-size="14.5" fill="#475569">how you actually work.</text>
+  </g>
+
+  <polygon points="895,305 925,320 895,335" fill="#94a3b8"/>
+
+  <!-- Frame 3: Outcome -->
+  <g>
+    <rect x="940" y="235" width="400" height="170" rx="14" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1.5"/>
+    <rect x="940" y="235" width="6" height="170" fill="#10b981" rx="3"/>
+    <text x="970" y="275" font-size="13" font-weight="700" letter-spacing="1.5" fill="#059669">THE OUTCOME</text>
+    <text x="970" y="315" font-size="22" font-weight="700" fill="#064e3b">You pick up instantly.</text>
+    <text x="970" y="348" font-size="14.5" fill="#475569">Next session opens with your prefs</text>
+    <text x="970" y="370" font-size="14.5" fill="#475569">and a note from yesterday-you.</text>
+    <text x="970" y="392" font-size="14.5" fill="#475569">No re-explaining. You just work.</text>
+  </g>
+
+  <!-- SECTION DIVIDER -->
+  <text x="700" y="470" font-size="26" font-weight="700" text-anchor="middle" fill="#0f172a">What Claude remembers about you</text>
+  <text x="700" y="498" font-size="15" text-anchor="middle" fill="#64748b">Three kinds of memory, all local, all yours to inspect.</text>
+
+  <!-- PILLAR 1: PREFERENCES -->
+  <g>
+    <rect x="60" y="530" width="410" height="190" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="95" cy="568" r="16" fill="#4f46e5"/>
+    <text x="95" y="574" font-size="14" font-weight="700" text-anchor="middle" fill="#ffffff">1</text>
+    <text x="125" y="573" font-size="20" font-weight="700" fill="#4f46e5">Preferences</text>
+    <text x="82" y="608" font-size="14" fill="#475569">How you like to work.</text>
+    <text x="82" y="640" font-size="13" fill="#64748b" font-style="italic">"uses uv, not pip · responds in Spanish</text>
+    <text x="82" y="660" font-size="13" fill="#64748b" font-style="italic">terse replies · no docstrings"</text>
+    <text x="82" y="695" font-size="13" font-weight="600" fill="#4f46e5">Saved once. Never re-explained.</text>
+  </g>
+
+  <!-- PILLAR 2: HANDOFFS -->
+  <g>
+    <rect x="495" y="530" width="410" height="190" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="530" cy="568" r="16" fill="#10b981"/>
+    <text x="530" y="574" font-size="14" font-weight="700" text-anchor="middle" fill="#ffffff">2</text>
+    <text x="560" y="573" font-size="20" font-weight="700" fill="#059669">Handoffs</text>
+    <text x="517" y="608" font-size="14" fill="#475569">What you were doing.</text>
+    <text x="517" y="640" font-size="13" fill="#64748b" font-style="italic">"was refactoring auth to JWT;</text>
+    <text x="517" y="660" font-size="13" fill="#64748b" font-style="italic">signup still on old sessions."</text>
+    <text x="517" y="695" font-size="13" font-weight="600" fill="#059669">A note from yesterday-you.</text>
+  </g>
+
+  <!-- PILLAR 3: PATTERNS -->
+  <g>
+    <rect x="930" y="530" width="410" height="190" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="965" cy="568" r="16" fill="#d97706"/>
+    <text x="965" y="574" font-size="14" font-weight="700" text-anchor="middle" fill="#ffffff">3</text>
+    <text x="995" y="573" font-size="20" font-weight="700" fill="#b45309">Patterns</text>
+    <text x="952" y="608" font-size="14" fill="#475569">How you actually work.</text>
+    <text x="952" y="640" font-size="13" fill="#64748b" font-style="italic">files always edited together,</text>
+    <text x="952" y="660" font-size="13" fill="#64748b" font-style="italic">recurring errors, tool habits.</text>
+    <text x="952" y="695" font-size="13" font-weight="600" fill="#b45309">A wiki. You stay in control.</text>
+  </g>
+
+  <!-- TRUST STRIP -->
+  <rect x="60" y="755" width="1280" height="60" rx="10" fill="#0f172a"/>
+  <text x="700" y="779" font-size="13" font-weight="700" letter-spacing="2" text-anchor="middle" fill="#a5b4fc">BUILT LIGHT, ON PURPOSE</text>
+  <text x="700" y="803" font-size="15" text-anchor="middle" fill="#e2e8f0" letter-spacing="0.5">
+    ~350 ambient tokens  ·  zero API cost  ·  100% local  ·  no Docker  ·  no MCP  ·  one-line install
+  </text>
+
+  <!-- FOOTER -->
+  <text x="60" y="848" font-size="11" fill="#94a3b8">sebastianbreguel/claude-engram  ·  MIT  ·  Claude Code plugin  ·  /plugin install claude-engram@sebastianbreguel/claude-engram</text>
+</svg>

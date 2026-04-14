@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# engram uninstaller
+# claude-engram uninstaller
 # Removes tools, hooks, and skills. Does NOT delete memory.db (your data).
 
 set -euo pipefail
 
 CLAUDE_DIR="$HOME/.claude"
 
-echo "engram uninstaller"
+echo "claude-engram uninstaller"
 echo "================================"
 echo ""
 

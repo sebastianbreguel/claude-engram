@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# engram installer
+# claude-engram installer
 # Copies tools, hooks, and skills into ~/.claude/ and wires up settings.json
 
 set -euo pipefail
@@ -7,7 +7,7 @@ set -euo pipefail
 CLAUDE_DIR="$HOME/.claude"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "engram installer"
+echo "claude-engram installer"
 echo "============================="
 echo ""
 
