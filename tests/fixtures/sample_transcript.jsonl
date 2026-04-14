@@ -1,0 +1,8 @@
+{"type":"user","message":{"content":"Let's use uv instead of pip for this project."}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Got it. Switching to uv."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"On branch main\nnothing to commit"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/engram-test/src/auth.py"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"File updated"}]}}
+{"type":"user","message":{"content":"Actually, let's not use Docker for this — prefer local setup."}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Understood. Removing Docker references."}]}}
