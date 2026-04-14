@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memcapture-inject.sh"
+            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/tools/engram.py on-session-start"
           }
         ]
       }
@@ -15,19 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memcapture-hook.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memcompact-hook.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memdigest-hook.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mempatterns-hook.sh"
+            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/tools/engram.py on-precompact"
           }
         ]
       }
