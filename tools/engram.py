@@ -352,7 +352,7 @@ def _run_haiku(prompt: str, chunk: str, timeout: int = 120) -> str:
         return ""
     try:
         result = subprocess.run(
-            [claude_bin, "--print", "--model", "claude-haiku-4-5", "-p", prompt],
+            [claude_bin, "--print", "--model", "claude-sonnet-4-6", "-p", prompt],
             input=chunk,
             capture_output=True,
             text=True,
