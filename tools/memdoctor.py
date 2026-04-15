@@ -16,6 +16,7 @@ import json
 import re
 import sqlite3
 from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -67,6 +68,8 @@ MIN_CORRECTIONS_TO_FLAG = 2
 KEEP_GOING_MIN_TO_FLAG = 2
 ERROR_LOOP_THRESHOLD = 3
 MAX_USER_MESSAGE_LENGTH = 2000
+RAPID_CORRECTION_WINDOW_SECONDS = 60
+RAPID_CORRECTION_MIN_COUNT = 2
 
 RULES_MAP = {
     "correction-heavy": (
@@ -78,6 +81,7 @@ RULES_MAP = {
     "keep-going-loop": (
         "Complete the FULL task before stopping. Don't stop early — if the user asked for N items, deliver all N before handing back."
     ),
+    "rapid-corrections": ("Two corrections within a minute is a frustration spike. Stop and ask what the user wants before continuing."),
 }
 
 
@@ -169,8 +173,58 @@ def detect_keep_going(events: list[dict]) -> str | None:
     return None
 
 
+def _parse_ts(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _extract_user_texts_with_ts(events: list[dict]) -> list[tuple[str, datetime]]:
+    """User messages with timestamps — same filters as _extract_user_texts, plus drops entries with unparseable ts."""
+    out: list[tuple[str, datetime]] = []
+    for ev in events:
+        if ev.get("type") != "user" or ev.get("isMeta"):
+            continue
+        content = (ev.get("message") or {}).get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        if len(content) > MAX_USER_MESSAGE_LENGTH:
+            continue
+        if _is_meta_message(content) or content.startswith("[Request interrupted"):
+            continue
+        ts = _parse_ts(ev.get("timestamp"))
+        if ts is None:
+            continue
+        out.append((content, ts))
+    return out
+
+
+def detect_rapid_corrections(events: list[dict]) -> str | None:
+    """Flag when ≥RAPID_CORRECTION_MIN_COUNT corrections land within a rolling RAPID_CORRECTION_WINDOW_SECONDS window."""
+    timestamps = [ts for text, ts in _extract_user_texts_with_ts(events) if any(p.match(text) for p in CORRECTION_PATTERNS)]
+    if len(timestamps) < RAPID_CORRECTION_MIN_COUNT:
+        return None
+    window = timedelta(seconds=RAPID_CORRECTION_WINDOW_SECONDS)
+    for i in range(len(timestamps) - RAPID_CORRECTION_MIN_COUNT + 1):
+        if timestamps[i + RAPID_CORRECTION_MIN_COUNT - 1] - timestamps[i] <= window:
+            return "rapid-corrections"
+    return None
+
+
 def detect_signals(events: list[dict]) -> list[str]:
-    return [s for s in (detect_correction_heavy(events), detect_error_loop(events), detect_keep_going(events)) if s]
+    return [
+        s
+        for s in (
+            detect_correction_heavy(events),
+            detect_error_loop(events),
+            detect_keep_going(events),
+            detect_rapid_corrections(events),
+        )
+        if s
+    ]
 
 
 def _tool_result_text(block: dict) -> str | None:

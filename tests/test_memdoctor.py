@@ -5,6 +5,7 @@ Fixtures ported from millionco/claude-doctor (MIT).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from memdoctor import (
     detect_correction_heavy,
     detect_error_loop,
     detect_keep_going,
+    detect_rapid_corrections,
     detect_signals,
     enrich_from_memory,
     extract_error_context,
@@ -201,6 +203,48 @@ class TestEnrichFromMemory:
 
     def test_returns_none_when_no_match(self, seeded_db):
         assert enrich_from_memory("TotallyUnrelatedZzzError xxxxx", db_path=seeded_db) is None
+
+
+class TestRapidCorrections:
+    @staticmethod
+    def _mk(path: Path, entries: list[tuple[str, str]]) -> list[dict]:
+        """entries = [(text, iso-timestamp), ...] — write JSONL and parse."""
+        lines = [json.dumps({"type": "user", "timestamp": ts, "message": {"content": text}}) for text, ts in entries]
+        path.write_text("\n".join(lines) + "\n")
+        return parse_jsonl(path)
+
+    def test_flags_when_two_corrections_within_60s(self, tmp_path):
+        events = self._mk(
+            tmp_path / "a.jsonl",
+            [
+                ("no, wrong", "2026-04-15T10:00:00.000Z"),
+                ("stop that", "2026-04-15T10:00:30.000Z"),
+            ],
+        )
+        assert detect_rapid_corrections(events) == "rapid-corrections"
+
+    def test_ignores_slow_corrections(self, tmp_path):
+        events = self._mk(
+            tmp_path / "b.jsonl",
+            [
+                ("no, wrong", "2026-04-15T10:00:00.000Z"),
+                ("stop that", "2026-04-15T10:10:00.000Z"),
+            ],
+        )
+        assert detect_rapid_corrections(events) is None
+
+    def test_ignores_single_correction(self, tmp_path):
+        events = self._mk(
+            tmp_path / "c.jsonl",
+            [
+                ("no, wrong", "2026-04-15T10:00:00.000Z"),
+                ("ok thanks", "2026-04-15T10:00:10.000Z"),
+            ],
+        )
+        assert detect_rapid_corrections(events) is None
+
+    def test_ignores_happy_session(self, happy_session):
+        assert detect_rapid_corrections(happy_session) is None
 
 
 class TestPerProjectRules:
