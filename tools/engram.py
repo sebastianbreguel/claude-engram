@@ -248,22 +248,18 @@ Rules:
 
 After the facts, add ONE blank line, then a single handoff paragraph addressed to the NEXT Claude session working in this project. Start with "HANDOFF: " and write 2-4 sentences in natural prose: what were we doing, where did we leave off, what should the next session pick up. Be concrete, not meta."""
 
-EXEC_PROMPT = """Mergeá los dos insumos en un punteo ejecutivo para abrir la próxima sesión.
+EXEC_PROMPT = """Mergeá recap + context en UNA línea accionable para abrir la próxima sesión.
 
-## Insumo 1 — recap de Claude Code (qué estaba pasando al final)
-{recap}
+RECAP: {recap}
+CONTEXT: {context}
 
-## Insumo 2 — contexto de engram (patterns, memorias, handoff propio)
-{context}
+Formato: una sola línea, ≤120 chars, empieza con "next:" seguido de la acción más crítica.
+Si hay múltiples pasos secuenciales, uní con " → " (máx 3).
+Sin bullets, sin paths absolutos, sin "Prioridad", sin comillas de code, sin preámbulo ni cierre.
 
-## Output
-- 4 a 6 bullets, cada uno ≤80 chars
-- Primer bullet: proyecto + estado actual
-- Siguientes: próximo paso, constraints, patterns o errores recurrentes
-- Cada línea empieza con "- "
-- No dupliques info entre bullets. Accionable > descriptivo.
+Ejemplo: next: dispatcher DISPATCH dict → integrar latest_recap() → docs
 
-Devolvé SOLO el punteo, sin preámbulo ni cierre.
+Devolvé SOLO esa línea.
 """
 
 
