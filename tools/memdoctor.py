@@ -14,10 +14,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from collections import defaultdict
+import sqlite3
+from collections import Counter, defaultdict
 from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
+MEMORY_DB = Path.home() / ".claude" / "memory.db"
+
+ABS_PATH_RE = re.compile(r"/(?:[\w.-]+/)+[\w.-]+")
 
 CORRECTION_PATTERNS = [
     re.compile(r"^no[,.\s!]", re.IGNORECASE),
@@ -169,6 +173,84 @@ def detect_signals(events: list[dict]) -> list[str]:
     return [s for s in (detect_correction_heavy(events), detect_error_loop(events), detect_keep_going(events)) if s]
 
 
+def _tool_result_text(block: dict) -> str | None:
+    content = block.get("content")
+    if isinstance(content, str):
+        return content or None
+    if isinstance(content, list):
+        parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        joined = "\n".join(p for p in parts if p)
+        return joined or None
+    return None
+
+
+def extract_error_context(events: list[dict]) -> str | None:
+    """Return the text of the last tool_result with is_error=True, if any."""
+    last = None
+    for ev in events:
+        if ev.get("type") != "user":
+            continue
+        content = (ev.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("is_error"):
+                text = _tool_result_text(block)
+                if text:
+                    last = text
+    return last
+
+
+def normalize_error(text: str) -> str:
+    """First meaningful line with absolute paths replaced by <path>, capped at 200 chars."""
+    first = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("File "):
+            first = stripped
+            break
+    if not first:
+        first = text.strip()[:200]
+    first = ABS_PATH_RE.sub("<path>", first)
+    return first[:200]
+
+
+def enrich_from_memory(error_text: str, db_path: Path = MEMORY_DB) -> dict | None:
+    """Look up prior occurrences of an error in memory.db facts table. Returns None if DB missing or no match."""
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        return None
+    conn.row_factory = sqlite3.Row
+    try:
+        tokens = [t for t in re.findall(r"\w{3,}", error_text) if not t.isdigit()][:4]
+        rows: list = []
+        if tokens:
+            fts_query = " ".join(tokens)
+            try:
+                rows = conn.execute(
+                    "SELECT project FROM facts_fts WHERE facts_fts MATCH ? AND type='error' LIMIT 50",
+                    (fts_query,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+        if not rows:
+            snippet = error_text[:80]
+            rows = conn.execute(
+                "SELECT s.project FROM facts f JOIN sessions s ON f.session_id = s.session_id "
+                "WHERE f.type='error' AND f.content LIKE ? LIMIT 50",
+                (f"%{snippet}%",),
+            ).fetchall()
+        if not rows:
+            return None
+        projects = sorted({r["project"] for r in rows if r["project"]})
+        return {"count": len(rows), "projects": projects[:3]}
+    finally:
+        conn.close()
+
+
 def format_rules(signals: set[str]) -> str:
     bullets = [f"- {RULES_MAP[s]}" for s in sorted(signals) if s in RULES_MAP]
     return "\n".join(bullets)
@@ -199,13 +281,19 @@ def _iter_sessions(project_filter: str | None = None):
 
 
 def _analyze(project_filter: str | None = None) -> dict:
-    """Walk sessions, return aggregated signal counts + per-project breakdown."""
+    """Walk sessions, return aggregated signal counts + per-project breakdown + error samples."""
     per_project: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    error_samples: list[tuple[str, str]] = []
     session_count = 0
     for project, _sid, events in _iter_sessions(project_filter):
         session_count += 1
-        for signal in detect_signals(events):
+        signals = detect_signals(events)
+        for signal in signals:
             per_project[project][signal] += 1
+        if "error-loop" in signals:
+            err = extract_error_context(events)
+            if err:
+                error_samples.append((project, normalize_error(err)))
     totals: dict[str, int] = defaultdict(int)
     for sig_counts in per_project.values():
         for signal, count in sig_counts.items():
@@ -214,6 +302,7 @@ def _analyze(project_filter: str | None = None) -> dict:
         "sessions": session_count,
         "projects": dict(per_project),
         "totals": dict(totals),
+        "error_samples": error_samples,
     }
 
 
@@ -237,6 +326,21 @@ def _print_summary(report: dict) -> None:
         total = sum(sig_counts.values())
         sigs = ", ".join(f"{s}({c})" for s, c in sorted(sig_counts.items(), key=lambda x: -x[1]))
         print(f"  [{total}] {project} — {sigs}")
+    _print_enriched_errors(report.get("error_samples", []))
+
+
+def _print_enriched_errors(samples: list[tuple[str, str]]) -> None:
+    if not samples:
+        return
+    counts = Counter(err for _, err in samples)
+    top = counts.most_common(5)
+    print("\nTop errors (error-loop):")
+    for err, count in top:
+        print(f"  [{count}x] {err[:100]}")
+        enriched = enrich_from_memory(err)
+        if enriched:
+            projs = ", ".join(enriched["projects"]) or "?"
+            print(f"    ↳ seen {enriched['count']}x in memory.db (projects: {projs})")
 
 
 def _print_rules(report: dict) -> None:

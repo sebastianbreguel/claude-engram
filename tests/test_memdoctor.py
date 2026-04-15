@@ -13,7 +13,10 @@ from memdoctor import (
     detect_error_loop,
     detect_keep_going,
     detect_signals,
+    enrich_from_memory,
+    extract_error_context,
     format_rules,
+    normalize_error,
     parse_jsonl,
 )
 
@@ -126,6 +129,78 @@ class TestFormatRules:
     def test_ignores_unknown_signals(self):
         result = format_rules({"does-not-exist"})
         assert result == ""
+
+
+class TestExtractErrorContext:
+    def test_extracts_last_error_from_fixture(self, error_loop_session):
+        err = extract_error_context(error_loop_session)
+        assert err is not None
+        assert "Connection refused" in err
+
+    def test_returns_none_when_no_errors(self, happy_session):
+        assert extract_error_context(happy_session) is None
+
+    def test_extracts_text_blocks_from_list_content(self):
+        events = [
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {"type": "tool_result", "is_error": True, "content": [{"type": "text", "text": "BOOM"}]},
+                    ]
+                },
+            }
+        ]
+        assert extract_error_context(events) == "BOOM"
+
+
+class TestNormalizeError:
+    def test_strips_absolute_paths(self):
+        text = "ModuleNotFoundError at /Users/foo/bar/main.py line 42"
+        assert "/Users/foo" not in normalize_error(text)
+        assert "<path>" in normalize_error(text)
+
+    def test_skips_leading_file_lines(self):
+        text = 'File "/Users/a/b.py", line 10\nActualError: boom'
+        assert normalize_error(text).startswith("ActualError")
+
+    def test_caps_at_200_chars(self):
+        assert len(normalize_error("x" * 500)) == 200
+
+
+class TestEnrichFromMemory:
+    @pytest.fixture
+    def seeded_db(self, tmp_path):
+        import sqlite3
+
+        path = tmp_path / "memory.db"
+        conn = sqlite3.connect(path)
+        conn.executescript("""
+            CREATE TABLE sessions (session_id TEXT PRIMARY KEY, project TEXT);
+            CREATE TABLE facts (session_id TEXT, type TEXT, content TEXT, content_hash TEXT, source_line INTEGER);
+            CREATE VIRTUAL TABLE facts_fts USING fts5(content, type, project, tokenize='unicode61');
+            INSERT INTO sessions VALUES ('s1', 'datascience');
+            INSERT INTO sessions VALUES ('s2', 'ml-exp');
+            INSERT INTO facts VALUES ('s1', 'error', 'ModuleNotFoundError: No module named numpy', 'h1', 1);
+            INSERT INTO facts VALUES ('s2', 'error', 'ModuleNotFoundError: No module named numpy', 'h2', 1);
+            INSERT INTO facts_fts VALUES ('ModuleNotFoundError: No module named numpy', 'error', 'datascience');
+            INSERT INTO facts_fts VALUES ('ModuleNotFoundError: No module named numpy', 'error', 'ml-exp');
+        """)
+        conn.commit()
+        conn.close()
+        return path
+
+    def test_finds_prior_error_via_fts(self, seeded_db):
+        result = enrich_from_memory("ModuleNotFoundError: No module named numpy", db_path=seeded_db)
+        assert result is not None
+        assert result["count"] == 2
+        assert "datascience" in result["projects"]
+
+    def test_returns_none_when_db_missing(self, tmp_path):
+        assert enrich_from_memory("anything", db_path=tmp_path / "nope.db") is None
+
+    def test_returns_none_when_no_match(self, seeded_db):
+        assert enrich_from_memory("TotallyUnrelatedZzzError xxxxx", db_path=seeded_db) is None
 
 
 class TestMetaFiltering:
