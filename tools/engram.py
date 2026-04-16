@@ -887,6 +887,8 @@ def _self_check(args: argparse.Namespace) -> int:
         "SELECT project, topic, message_count, tool_count, captured_at "
         "FROM sessions WHERE message_count >= 3 AND tool_count >= 15 "
         "AND LENGTH(COALESCE(topic, '')) < 80 "
+        "AND COALESCE(topic, '') NOT LIKE 'Base directory for this skill:%' "
+        "AND COALESCE(topic, '') NOT LIKE 'Unknown command:%' "
         "ORDER BY (CAST(tool_count AS REAL) / message_count) DESC LIMIT ?",
         (args.limit,),
     ).fetchall()
