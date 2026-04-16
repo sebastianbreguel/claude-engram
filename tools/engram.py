@@ -867,7 +867,7 @@ def build_parser() -> argparse.ArgumentParser:
     up = sub.add_parser("on-user-prompt", help="hook: mid-session digest every N prompts")
     up.set_defaults(func=_on_user_prompt)
 
-    rl = sub.add_parser("_run-llm", help="(internal) Haiku digest or snapshot")
+    rl = sub.add_parser("_run-llm", help="(internal) Sonnet digest or snapshot")
     rl.add_argument("--mode", choices=sorted(_LLM_MODES.keys()), required=True)
     rl.add_argument("--transcript", required=True)
     rl.add_argument("--session-id", dest="session_id", required=True)

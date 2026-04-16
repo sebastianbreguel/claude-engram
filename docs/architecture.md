@@ -10,12 +10,14 @@ claude-engram is a Claude Code plugin with **three hooks, one Python entrypoint*
 ├── patterns/                    # Obsidian-compatible wiki (mempatterns output)
 ├── session-env/                 # Pre-compact work-state snapshots (markdown)
 ├── engram/
-│   └── executive/<cwd-slug>.md  # Per-project executive summary cache (1-line)
+│   └── executive/<cwd-slug>.md       # Per-project executive summary cache (3 bullets)
+│   └── executive/<cwd-slug>.md.prev  # Rotated previous summary (safety net)
 │
 ├── tools/
 │   ├── engram.py                # Unified CLI + hook orchestrator (single entrypoint)
 │   ├── memcapture.py            # JSONL parser + SQLite writer + FTS5 search
-│   └── mempatterns.py           # Pattern detection (file co-edits, tool bias, errors)
+│   ├── mempatterns.py           # Pattern detection (file co-edits, tool bias, errors)
+│   └── memdoctor.py             # Friction signal detector (correction-heavy, error-loop, restart-cluster, ...)
 │
 └── skills/
     ├── memclean/SKILL.md        # /memclean — consolidation
@@ -50,9 +52,9 @@ Manual installs use `$HOME/.claude` instead of `$CLAUDE_PLUGIN_ROOT` — both pa
 2. **Fire-and-forget:** spawn detached Sonnet 4.6 subprocess for **digest** (preferences, practices, handoff paragraph) — result ingested back via stdin into `memories`.
 3. **Fire-and-forget:** spawn detached Sonnet 4.6 subprocess for **snapshot** (JSON: task, files, last_error, summary) — stored in `compactions`.
 4. **Synchronous:** run `mempatterns --update` over the *previous* session's memories to refresh `~/.claude/patterns/`.
-5. **Fire-and-forget:** spawn detached Sonnet 4.6 subprocess for **executive** — merges Claude Code's `※ recap` with engram's inject_context into a single `next: …` line cached at `~/.claude/engram/executive/<cwd-slug>.md`.
+5. **Fire-and-forget:** spawn detached Sonnet 4.6 subprocess for **executive** — merges Claude Code's `※ recap` + engram's inject_context + `memdoctor` friction signals + git state (branch + dirty files) into a 3-bullet summary (`status` / `last change` / `next`) cached at `~/.claude/engram/executive/<cwd-slug>.md`. Previous cache is rotated to `<cwd-slug>.md.prev` before overwrite as a safety net.
 
-The fire-and-forget subprocesses use `start_new_session=True` so they survive the parent hook's exit. No lockfile — concurrent compactions are absorbed by `PRAGMA busy_timeout=5000` + `UNIQUE(topic)` on `memories`. The executive cache is overwrite-only (latest wins).
+The fire-and-forget subprocesses use `start_new_session=True` so they survive the parent hook's exit. No lockfile — concurrent compactions are absorbed by `PRAGMA busy_timeout=5000` + `UNIQUE(topic)` on `memories`. The executive cache is overwrite-only (latest wins), with one-step rollback via `engram preview --prev`.
 
 ### UserPromptSubmit (`engram.py on-user-prompt`)
 
@@ -129,8 +131,8 @@ PRAGMA busy_timeout = 5000;            -- collision absorber
 4. **Dedup by default** — MD5 content hash prevents duplicate facts across sessions.
 5. **Topic-keyed upsert** — `UNIQUE(topic)` on `memories`. Same topic = one row, latest wins. No contradictions, no merge logic.
 6. **Durable vs ephemeral** — preferences persist indefinitely; project state expires in 7 days. Ephemeral memories are scoped to the current `cwd`.
-7. **Collision absorber, not coordination** — two PreCompact hooks racing on the same session are absorbed by `PRAGMA busy_timeout=5000` + `UNIQUE(topic)`. No lockfile, no coordinator. Cost: occasional redundant Haiku call.
-8. **Schema-in-CREATE** — all columns live in the `CREATE TABLE IF NOT EXISTS` statement. No runtime migration probes. v2 typed constraints will need a `PRAGMA user_version` framework.
+7. **Collision absorber, not coordination** — two PreCompact hooks racing on the same session are absorbed by `PRAGMA busy_timeout=5000` + `UNIQUE(topic)`. No lockfile, no coordinator. Cost: occasional redundant Sonnet call.
+8. **Schema baseline stamped at `user_version=1`** — columns live in `CREATE TABLE IF NOT EXISTS`. Future typed constraints hook into a `PRAGMA user_version` migration ladder.
 9. **Patterns runs on previous session's memories** — PreCompact order is: capture (sync) → digest (async) → patterns (sync). Patterns reflect what the last compaction wrote, not this one. By design.
 10. **Advisory skills** — `/memclean`, `/reflect`, `/patterns` can suggest but never auto-write. You stay in control.
 11. **Idempotent install** — re-running `install.sh` strips legacy `.sh` hook entries from `settings.json` and reinstalls the unified `engram.py` hooks. `memory.db` and `patterns/` are preserved.
@@ -143,6 +145,6 @@ This trades a tiny bit of startup time for a simpler mental model, a single plac
 
 ## Why the executive cache
 
-Claude Code now emits its own `※ recap` (one-line summary of the current session, stored as `type:system, subtype:away_summary` in the session JSONL). engram extracts the latest recap matching the current `cwd`, merges it with its own inject_context, and asks Sonnet for a single `next: <step>` line. The merge happens between sessions (PreCompact or every 25 prompts) so SessionStart stays latency-free.
+Claude Code emits its own `※ recap` (one-line summary of the current session, stored as `type:system, subtype:away_summary` in the session JSONL). engram extracts the latest recap matching the current `cwd`, merges it with its own inject_context, `memdoctor` friction signals, and git state, and asks Sonnet for a **3-bullet summary** (`status` / `last change` / `next`). The merge happens between sessions (PreCompact or every `ENGRAM_DIGEST_EVERY` prompts, default 25) so SessionStart stays latency-free.
 
-Inputs grow over time (more memories, newer recap); the output stays one line. Sonnet re-compresses from scratch each rebuild — no stale bullets accumulate.
+The `next:` bullet prioritizes friction signals when present (e.g. if memdoctor flags an error-loop, `next:` addresses it before feature work). Inputs grow over time (more memories, newer recap, new signals); the output stays 3 bullets. Sonnet re-compresses from scratch each rebuild — no stale bullets accumulate. If a rebuild compresses badly, `engram preview --prev` prints the rotated previous cache.

@@ -4,7 +4,7 @@
 
 Author: Sebastian Breguel
 License: MIT
-Last updated: 2026-04-14
+Last updated: 2026-04-16
 
 ---
 
@@ -36,7 +36,7 @@ Pattern and context files are stored in `~/.claude/patterns/` (Markdown).
 
 claude-engram makes **zero network requests**. There is no telemetry, no analytics, no tracking, and no phoning home.
 
-The only LLM interaction is through `claude --print` during context compaction. This runs locally through your own Claude Code session and uses whatever model and billing you already have configured. No separate API keys are required.
+The only LLM interaction is through `claude --print --model claude-sonnet-4-6`, invoked in the background on compaction and every `ENGRAM_DIGEST_EVERY` prompts (default 25). It runs locally through your own Claude Code session and uses whatever model and billing you already have configured. No separate API keys are required. Set `ENGRAM_SKIP_LLM=1` to disable.
 
 ## Third-party services
 

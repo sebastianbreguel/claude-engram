@@ -90,8 +90,15 @@ Everything lives in `~/.claude/memory.db` (SQLite) and `~/.claude/patterns/` (ma
 uv run ~/.claude/tools/engram.py stats              # what claude-engram knows
 uv run ~/.claude/tools/engram.py memories           # list learned memories
 uv run ~/.claude/tools/engram.py forget "topic"     # delete a memory
+uv run ~/.claude/tools/engram.py search <query>     # FTS5 search over captured facts
+uv run ~/.claude/tools/engram.py doctor             # friction signals (correction-heavy, error-loop, ...)
+uv run ~/.claude/tools/engram.py preview            # current executive summary
+uv run ~/.claude/tools/engram.py preview --prev     # rotated previous summary (safety net)
+uv run ~/.claude/tools/engram.py log --tail 20      # tail background LLM failures
 uv run ~/.claude/tools/engram.py patterns --report  # detected patterns
 ```
+
+Full reference: [docs/cli-reference.md](docs/cli-reference.md).
 
 ## Optional: pattern detection
 
@@ -156,13 +163,14 @@ Open `vambe-datascience` and you get vambe context. Switch to `claude-engram` an
 - **SessionStart:** read cached executive (`<cwd-slug>.md`) → inject as `additionalContext`. Falls back to full `memcapture --inject` + banner if cache is missing.
 - **Concurrency:** no locks — `PRAGMA busy_timeout=5000` + `UNIQUE(topic)` absorb races; executive cache is overwrite-only.
 
-**Files (3 Python, 0 external deps):**
+**Files (4 Python, 0 external deps):**
 
 | File | Lines | Role |
 |---|---|---|
-| `engram.py` | ~770 | CLI + hook orchestrator, Sonnet dispatch, prompt templates, executive cache |
+| `engram.py` | ~900 | CLI + hook orchestrator, Sonnet dispatch, prompt templates, executive cache |
 | `memcapture.py` | ~1,200 | JSONL parser, SQLite schema, inject builder, FTS5 search |
 | `mempatterns.py` | ~600 | Pattern detection (file co-edits, tool habits, errors), wiki generator |
+| `memdoctor.py` | ~540 | Friction signal detector (correction-heavy, error-loop, restart-cluster, ...) |
 
 ## At a glance
 

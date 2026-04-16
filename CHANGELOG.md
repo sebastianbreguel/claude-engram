@@ -3,15 +3,25 @@
 ## Unreleased
 
 ### Added
-- **Executive summary** at SessionStart: Sonnet merges Claude Code's `※ recap` (`away_summary`) with engram's inject_context into a single `next: <step>` line, cached per-project at `~/.claude/engram/executive/<cwd-slug>.md`. Read on SessionStart with zero latency; rebuilt in background on PreCompact and every 25 prompts.
+- **Executive summary** at SessionStart: Sonnet merges Claude Code's `※ recap` (`away_summary`) with engram's inject_context into a **3-bullet summary** (`status` / `last change` / `next`), cached per-project at `~/.claude/engram/executive/<cwd-slug>.md`. Read on SessionStart with zero latency; rebuilt in background on PreCompact and every 25 prompts.
 - **UserPromptSubmit hook** (`engram.py on-user-prompt`): counts prompts per session and fires mid-session digest + executive rebuild every `ENGRAM_DIGEST_EVERY` prompts (default 25). Keeps long sessions from going stale even without a PreCompact event.
-- `engram preview` subcommand: prints (and builds if missing) the executive cache for the current `cwd`. Useful for debugging.
+- `engram preview` subcommand: prints (and builds if missing) the executive cache for the current `cwd`.
+- `engram preview --prev`: prints the rotated previous cache (`.prev` safety net). Never triggers a rebuild. Recovers the last good summary when a rebuild compresses badly.
+- `engram search <query>`: FTS5 search over captured facts (delegates to `memcapture`).
+- `engram log --tail N`: tails `~/.claude/engram.log` — background LLM failures with UTC timestamps. Default N=20.
+- `engram doctor` (memdoctor): detects friction signals across sessions — `correction-heavy`, `error-loop`, `keep-going-loop`, `rapid-corrections`, `restart-cluster`. `--per-project` emits one scoped rule block per project.
+- **Friction-aware executive**: `memdoctor.signals_for_executive()` injects the top active signals into the executive prompt, and Sonnet prioritizes them in the `next:` bullet.
+- **Git-aware snapshots**: snapshot subprocess now prepends branch + dirty file count (2s subprocess timeout, handles non-repo cleanly).
+- **Executive cache `.prev` rotation**: before overwriting `<cwd-slug>.md`, the existing file is moved to `<cwd-slug>.md.prev` via `os.replace`. One-step rollback via `preview --prev`.
+- `PRAGMA user_version = 1` stamped on first migration — baseline for future schema changes.
 
 ### Changed
 - LLM calls now use Sonnet 4.6 (was Haiku 4.5). Haiku hit `Prompt is too long` on large contexts; Sonnet handles the merge reliably.
+- Executive output format: `next: <line>` → **3-bullet punteo** (`status` / `last change` / `next`). Single-line was tried and reverted after user feedback — the 3-bullet variant survives compaction better at SessionStart.
 
 ### Fixed
 - Fire-and-forget subprocesses pass arguments as `--flag=value` (inline form) instead of `--flag value` (separate tokens). Project slugs like `-Users-sebabreguel-...` start with `-` and were mis-parsed as another flag by argparse, producing `expected one argument` errors on every PreCompact / UserPromptSubmit rebuild.
+- **`_run_llm` name collision**: `tools/engram.py` had two `def _run_llm` (helper at line 350, argparse handler at line 569). The second shadowed the first, so every call to the helper crashed with `TypeError: got an unexpected keyword argument 'chunk'`. Renamed helper to `_run_claude`. Regression guard added in `test_engram_cli.py`. Never shipped to production (`~/.claude/tools/engram.py` was on an older `_run_haiku` variant).
 
 ### Changed (previous drop)
 - Consolidated 5 shell hooks into 2 inline `engram.py` invocations (`on-precompact`, `on-session-start`). Net -381 lines.
@@ -40,6 +50,6 @@ Existing installs: run `./install.sh` again to migrate `settings.json` from the 
 ### Design notes — v1 constraints
 Explicit bets baked into this release, so users can judge them before reporting them as bugs:
 
-- **Concurrency is a collision absorber, not coordination.** Two PreCompact hooks firing on the same session spawn up to 2 Haiku subprocesses each; `PRAGMA busy_timeout=5000` + `UNIQUE(topic)` on `memories` absorb the rare race at the cost of occasional redundant LLM calls. No lockfile. Acceptable at Haiku 4.5 prices and single-user scale.
-- **Schema evolution is idempotent-ALTER only.** `facts` widens via `ALTER TABLE ADD COLUMN` for nullable typed fields. No `PRAGMA user_version` migration framework. v2 typed constraints will need one.
-- **`mempatterns` runs on the *previous* session's memories.** PreCompact orchestration is: sync capture → fire-and-forget Haiku digest → sync patterns. Patterns reflect what Haiku wrote last compaction, not this one. By design, not a bug.
+- **Concurrency is a collision absorber, not coordination.** Two PreCompact hooks firing on the same session spawn up to 2 Sonnet subprocesses each; `PRAGMA busy_timeout=5000` + `UNIQUE(topic)` on `memories` absorb the rare race at the cost of occasional redundant LLM calls. No lockfile. Acceptable at single-user scale.
+- **Schema baseline stamped at `user_version=1`.** `facts` widens via `ALTER TABLE ADD COLUMN` for nullable typed fields. Further typed constraints hook into the `PRAGMA user_version` migration ladder.
+- **`mempatterns` runs on the *previous* session's memories.** PreCompact orchestration is: sync capture → fire-and-forget Sonnet digest → sync patterns. Patterns reflect what Sonnet wrote last compaction, not this one. By design, not a bug.
