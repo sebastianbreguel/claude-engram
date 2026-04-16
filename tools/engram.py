@@ -682,6 +682,15 @@ def _on_executive(args: argparse.Namespace) -> int:
     cache = _executive_cache_path(cwd)
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
+        # Safety net: rotate existing cache to .prev before overwriting.
+        # Lets `engram preview --prev` recover the last good summary when
+        # Sonnet compresses the next rebuild poorly.
+        if cache.exists():
+            prev = cache.with_suffix(cache.suffix + ".prev")
+            try:
+                os.replace(cache, prev)
+            except OSError as e:
+                _log_warning(f"executive: rotate to .prev failed: {e}")
         cache.write_text(output + "\n", encoding="utf-8")
     except Exception as e:
         _log_warning(f"executive: cache write failed: {e}")
@@ -709,9 +718,20 @@ def _preview(args: argparse.Namespace) -> int:
     """Print the cached executive summary for a cwd. Builds it synchronously
     if no cache exists yet. Useful for debugging and demoing without opening
     a new session.
+
+    With --prev, prints the rotated previous cache (<slug>.md.prev) — a
+    safety net to recover the last good summary when the latest rebuild
+    compressed poorly. --prev never triggers a rebuild.
     """
     cwd = args.cwd or os.getcwd()
     cache = _executive_cache_path(cwd)
+    if getattr(args, "prev", False):
+        prev = cache.with_suffix(cache.suffix + ".prev")
+        if prev.exists():
+            sys.stdout.write(prev.read_text(encoding="utf-8"))
+            return 0
+        sys.stdout.write(f"(no previous executive summary at {prev})\n")
+        return 0
     if not cache.exists():
         ns = argparse.Namespace(cwd=cwd, project_key=cwd.replace("/", "-"))
         _on_executive(ns)
@@ -861,6 +881,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pv = sub.add_parser("preview", help="preview SessionStart executive summary (for debug/demo)")
     pv.add_argument("--cwd", default=None)
+    pv.add_argument("--prev", action="store_true", help="print the rotated previous cache (never rebuilds)")
     pv.set_defaults(func=_preview)
 
     return p

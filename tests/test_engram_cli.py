@@ -238,6 +238,68 @@ def test_exec_prompt_includes_signals_slot():
     assert "ACTIVE FRICTION" in mod.EXEC_PROMPT
 
 
+def test_executive_cache_rotates_to_prev(tmp_path, monkeypatch):
+    """_on_executive rotates <slug>.md → <slug>.md.prev before overwriting."""
+    import importlib.util
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    spec = importlib.util.spec_from_file_location("engram_mod", ENGRAM)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # Seed a cache file by hand, then invoke _on_executive with SKIP_LLM=1 so
+    # it would normally no-op. We need a cache write to happen, so patch
+    # _run_claude to return a canned string.
+    cwd = str(tmp_path / "proj")
+    (tmp_path / "proj").mkdir()
+    cache = mod._executive_cache_path(cwd)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("OLD SUMMARY\n")
+
+    monkeypatch.setattr(mod, "_run_claude", lambda prompt, chunk="", timeout=120: "NEW SUMMARY")
+    # Feed a fake recap so the function doesn't early-exit on empty inputs.
+    monkeypatch.setattr(mod, "_latest_recap", lambda c, max_files=20: "fake recap")
+
+    ns = __import__("argparse").Namespace(cwd=cwd, project_key=cwd.replace("/", "-"))
+    assert mod._on_executive(ns) == 0
+    assert cache.read_text().strip() == "NEW SUMMARY"
+    prev = cache.with_suffix(cache.suffix + ".prev")
+    assert prev.exists()
+    assert prev.read_text().strip() == "OLD SUMMARY"
+
+
+def test_preview_prev_reads_rotated_cache(tmp_path, monkeypatch):
+    """`engram preview --prev` prints the .prev file and never rebuilds."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    # Seed a .prev file for a known cwd; no main cache exists.
+    cwd = str(tmp_path / "proj")
+    (tmp_path / "proj").mkdir()
+    slug = cwd.replace("/", "-").strip("-") or "default"
+    exec_dir = fake_home / ".claude" / "engram" / "executive"
+    exec_dir.mkdir(parents=True, exist_ok=True)
+    (exec_dir / f"{slug}.md.prev").write_text("PREV SUMMARY\n")
+
+    result = _run(["preview", "--cwd", cwd, "--prev"])
+    assert result.returncode == 0
+    assert "PREV SUMMARY" in result.stdout
+
+
+def test_preview_prev_reports_missing_cleanly(tmp_path, monkeypatch):
+    """`engram preview --prev` with no .prev file returns a clean message."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    result = _run(["preview", "--cwd", str(tmp_path / "nope"), "--prev"])
+    assert result.returncode == 0
+    assert "no previous executive summary" in result.stdout
+
+
 def test_hooks_json_uses_engram_inline():
     """After Task 8, hooks.json references engram.py, not .sh."""
     config = _json.loads((REPO / "hooks" / "hooks.json").read_text())
