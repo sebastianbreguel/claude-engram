@@ -14,7 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sqlite3
+import subprocess
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -76,6 +79,8 @@ RAPID_CORRECTION_MIN_COUNT = 2
 MIN_USER_MSGS_PER_SESSION = 3
 RESTART_CLUSTER_SIZE = 3
 RESTART_WINDOW_MINUTES = 30
+PROPOSE_MIN_CORRECTIONS = 4
+PROPOSE_LLM_TIMEOUT_SECS = 60
 
 RULES_MAP = {
     "correction-heavy": (
@@ -580,15 +585,146 @@ def signals_banner_line(project_filter: str, top_n: int = 2) -> str:
     return f"friction: {parts} (run: engram doctor)"
 
 
+def _extract_corrections(events: list[dict]) -> list[str]:
+    """User messages that matched a CORRECTION_PATTERN, in order, deduplicated by text."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for text in _extract_user_texts(events):
+        if any(p.match(text) for p in CORRECTION_PATTERNS) and text not in seen:
+            seen.add(text)
+            out.append(text.strip())
+    return out
+
+
+def _most_recent_session(project_filter: str | None) -> tuple[Path, list[dict]] | None:
+    """Newest JSONL (by mtime) in filtered scope. Only returns sessions with real user activity."""
+    if not PROJECTS_DIR.exists():
+        return None
+    best: tuple[float, Path] | None = None
+    for project_dir in PROJECTS_DIR.iterdir():
+        if not project_dir.is_dir():
+            continue
+        decoded = _decode_project(project_dir.name)
+        if project_filter and project_filter not in decoded and project_filter not in project_dir.name:
+            continue
+        for jsonl in project_dir.glob("*.jsonl"):
+            try:
+                m = jsonl.stat().st_mtime
+            except OSError:
+                continue
+            if best is None or m > best[0]:
+                best = (m, jsonl)
+    if not best:
+        return None
+    events = parse_jsonl(best[1])
+    _, n_user = _session_meta(events)
+    if n_user < MIN_USER_MSGS_PER_SESSION:
+        return None
+    return best[1], events
+
+
+PROPOSE_PROMPT = """You analyze user corrections from a Claude Code session and propose durable feedback memories.
+
+Input: a list of user messages where the user corrected the assistant. Each is a standalone correction
+("no, don't do X", "I said Y", etc.).
+
+Output: 1 to 3 memory entries in the exact frontmatter format below. Only propose memories that capture
+DURABLE preferences likely to apply in future sessions — not one-off tactical fixes. If nothing durable
+emerges, output the single line: NO_DURABLE_MEMORIES
+
+Format per memory (separated by a blank line):
+
+---
+name: short_snake_case_name
+description: one-line description used for relevance matching in future sessions
+type: feedback
+---
+
+<the rule itself, one sentence>
+
+**Why:** <reason the user gave, or "inferred from repeated corrections">
+**How to apply:** <when/where this guidance kicks in>
+
+Rules:
+- Lead with the rule in plain language.
+- Do NOT invent reasons — if the user didn't say why, write "inferred from repeated corrections".
+- Skip generic advice ("be careful", "double-check"). Only propose memories grounded in the actual corrections.
+- Output ONLY the frontmatter blocks or NO_DURABLE_MEMORIES. No preamble, no commentary."""
+
+
+def _run_claude_propose(corrections: list[str]) -> str:
+    if not corrections:
+        return ""
+    import os
+
+    if os.environ.get("ENGRAM_SKIP_LLM") == "1":
+        return ""
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        return "ERROR: claude CLI not found in PATH"
+    stdin_chunk = "User corrections from session:\n\n" + "\n".join(f"- {c}" for c in corrections)
+    try:
+        result = subprocess.run(
+            [claude_bin, "--print", "--model", "claude-sonnet-4-6", "-p", PROPOSE_PROMPT],
+            input=stdin_chunk,
+            capture_output=True,
+            text=True,
+            timeout=PROPOSE_LLM_TIMEOUT_SECS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"ERROR: claude timed out after {PROPOSE_LLM_TIMEOUT_SECS}s"
+    except Exception as e:
+        return f"ERROR: claude subprocess failed: {e}"
+    if result.returncode != 0:
+        return f"ERROR: claude exit {result.returncode}: {result.stderr[:300]}"
+    return result.stdout.strip()
+
+
+def propose_memories(project_filter: str | None) -> int:
+    scope = project_filter or "(any project)"
+    found = _most_recent_session(project_filter)
+    if not found:
+        print(f"No recent session found for scope: {scope}", file=sys.stderr)
+        return 1
+    path, events = found
+    corrections = _extract_corrections(events)
+    print(f"# Session: {path.stem}", file=sys.stderr)
+    print(f"# Corrections detected: {len(corrections)} (threshold: {PROPOSE_MIN_CORRECTIONS})", file=sys.stderr)
+    if len(corrections) < PROPOSE_MIN_CORRECTIONS:
+        print("# Skipping: below threshold. Re-run after a rougher session.", file=sys.stderr)
+        return 0
+    print("# Calling claude --print to propose memories...", file=sys.stderr)
+    output = _run_claude_propose(corrections)
+    if not output:
+        print("# Empty response from claude.", file=sys.stderr)
+        return 1
+    if output.startswith("ERROR:"):
+        print(output, file=sys.stderr)
+        return 1
+    if output.strip() == "NO_DURABLE_MEMORIES":
+        print("# LLM found no durable memories worth proposing.", file=sys.stderr)
+        return 0
+    print(output)
+    print("\n# To save: paste into your memory directory and add an entry to MEMORY.md", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="engram doctor — friction signal detection")
     p.add_argument("--project", type=str, default=None, help="filter by project path substring")
     p.add_argument("--rules", action="store_true", help="print CLAUDE.md rule suggestions")
     p.add_argument("--per-project", action="store_true", help="with --rules, emit one rule block per project")
+    p.add_argument(
+        "--propose",
+        action="store_true",
+        help=f"propose feedback memories from the most recent session (requires ≥{PROPOSE_MIN_CORRECTIONS} corrections)",
+    )
     return p
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.propose:
+        return propose_memories(project_filter=args.project)
     report = _analyze(project_filter=args.project)
     if args.rules and args.per_project:
         _print_rules_per_project(report)
