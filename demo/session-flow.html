@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>engram — session flow (realistic)</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --fg: #d7dbe0;
+      --dim: #6b7280;
+      --muted: #9aa3ad;
+      --accent: #7ee787;
+      --claude: #ff9161;
+      --blue: #79c0ff;
+      --branch: #a6d8ff;
+      --yellow: #e3b341;
+      --magenta: #c57bdb;
+      --highlight: #f7e27a;
+      --divider: #1f242c;
+    }
+    html, body {
+      margin: 0; padding: 0; background: var(--bg);
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+      color: var(--fg); overflow: hidden;
+    }
+    .stage {
+      position: relative; overflow: hidden; transform-origin: top left;
+      background: var(--bg); padding: 48px 56px;
+      box-sizing: border-box;
+    }
+    .win {
+      display: flex; flex-direction: column; height: 100%;
+      font-size: 22px; line-height: 1.5;
+    }
+
+    /* zsh prompt row */
+    .shell {
+      display: flex; align-items: baseline; gap: 10px;
+      font-size: 22px; margin-bottom: 18px;
+    }
+    .shell .path { color: var(--blue); font-weight: 500; }
+    .shell .sep { color: var(--divider); }
+    .shell .branch { color: var(--branch); }
+    .shell .dirty { color: var(--yellow); margin-left: 6px; }
+    .shell .cmd { color: var(--fg); margin-left: 16px; }
+    .shell .right { margin-left: auto; color: var(--magenta); font-size: 18px; }
+    .shell .right .time { color: var(--dim); margin-left: 8px; }
+
+    /* Claude Code banner */
+    .cc {
+      display: grid; grid-template-columns: auto 1fr; gap: 24px;
+      margin-bottom: 22px; opacity: 0;
+    }
+    .cc .logo {
+      color: var(--claude);
+      font-size: 22px; line-height: 1.1;
+      white-space: pre;
+      letter-spacing: -0.02em;
+      margin-top: 2px;
+    }
+    .cc .info { display: flex; flex-direction: column; gap: 4px; }
+    .cc .info .title { color: var(--fg); font-weight: 600; }
+    .cc .info .model { color: var(--muted); }
+    .cc .info .cwd { color: var(--dim); }
+
+    /* engram hook output */
+    .engram { margin-bottom: 22px; font-size: 22px; }
+    .stats { opacity: 0; color: var(--muted); margin-bottom: 6px; }
+    .stats .tree { color: var(--divider); margin-right: 10px; }
+    .stats .hook { color: var(--muted); }
+    .stats .kw { color: var(--accent); font-weight: 600; }
+    .stats .proj { color: var(--blue); }
+    .stats .num { color: var(--fg); }
+    .stats .dot { color: var(--divider); margin: 0 8px; }
+
+    .bullet {
+      display: flex; padding-left: 48px;
+      color: var(--fg); margin-bottom: 4px; opacity: 0;
+    }
+    .bullet .dash { color: var(--dim); margin-right: 10px; }
+    .bullet .label { color: var(--muted); margin-right: 8px; }
+    .bullet .v { color: var(--fg); }
+    .bullet.hi .v { color: var(--highlight); }
+    .bullet.hi .label { color: var(--highlight); }
+
+    /* dividers + input */
+    .hr { height: 1px; background: var(--divider); margin: 8px 0; }
+    .input {
+      font-size: 22px; padding: 18px 0;
+      color: var(--fg); opacity: 0;
+    }
+    .input .car { color: var(--fg); margin-right: 10px; }
+    .input .typed { color: var(--fg); }
+    .cursor {
+      display: inline-block; width: 11px; height: 22px; background: var(--fg);
+      vertical-align: text-bottom; margin-left: 2px;
+      animation: blink 1s steps(2, start) infinite;
+    }
+    @keyframes blink { to { visibility: hidden; } }
+
+    /* status bar */
+    .status {
+      margin-top: auto; display: flex; align-items: center;
+      font-size: 18px; color: var(--dim); gap: 14px;
+      padding-top: 10px;
+    }
+    .status .model { color: var(--muted); }
+    .status .bar {
+      display: inline-block; width: 160px; height: 14px; background: #1a1f28;
+      border-radius: 2px; overflow: hidden;
+      vertical-align: middle;
+    }
+    .status .bar .fill { display: block; height: 100%; background: var(--muted); width: 0%; }
+    .status .pct { color: var(--muted); }
+    .status .git { color: var(--branch); }
+    .status .git .star { color: var(--yellow); }
+    .status .usage-wrap { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .status .effort { color: var(--accent); }
+
+    /* gap overlay */
+    .gap-label {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 40px; color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase;
+      opacity: 0; pointer-events: none; background: rgba(12,14,18,0.75);
+    }
+
+    /* caption */
+    .caption {
+      position: absolute; left: 0; right: 0; bottom: 64px;
+      text-align: center; font-size: 26px; color: var(--muted); opacity: 0;
+    }
+    .caption .hi { color: var(--accent); }
+    .caption .arrow { color: var(--accent); margin-right: 10px; }
+
+    /* preview-only explainer (hidden from HyperFrames render) */
+    #explainer {
+      display: none; position: fixed; right: 16px; top: 16px;
+      width: 400px; max-height: calc(100vh - 32px);
+      background: rgba(19,23,28,0.96);
+      border: 1px solid var(--divider);
+      border-radius: 10px;
+      color: var(--fg);
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+      font-size: 13px; line-height: 1.55;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+      z-index: 50; overflow: hidden;
+      backdrop-filter: blur(4px);
+    }
+    body.preview #explainer { display: block; }
+    #explainer header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-bottom: 1px solid var(--divider);
+      background: rgba(0,0,0,0.25);
+    }
+    #explainer header strong { color: var(--accent); font-weight: 600; letter-spacing: 0.04em; }
+    #explainer header .sub { color: var(--dim); font-size: 11px; margin-left: 10px; }
+    #explainer header button {
+      background: transparent; border: 0; color: var(--muted);
+      cursor: pointer; font-size: 14px; font-family: inherit; padding: 0 4px;
+    }
+    #explainer ol {
+      margin: 0; padding: 12px 14px 12px 36px;
+      max-height: 55vh; overflow-y: auto;
+    }
+    #explainer li {
+      margin: 0 0 10px 0; color: var(--muted);
+      transition: color 0.2s ease;
+    }
+    #explainer li .t {
+      color: var(--dim); font-weight: 600; margin-right: 8px;
+      display: inline-block; min-width: 44px;
+    }
+    #explainer li.active { color: var(--fg); }
+    #explainer li.active .t { color: var(--accent); }
+    #explainer li .hi { color: var(--accent); }
+    #explainer li .tag { color: var(--blue); }
+    #explainer li code {
+      background: rgba(255,255,255,0.05); padding: 1px 5px; border-radius: 3px;
+      font-family: inherit; color: var(--fg); font-size: 12px;
+    }
+    #explainer footer {
+      padding: 8px 14px; border-top: 1px solid var(--divider);
+      font-size: 11px; color: var(--dim);
+    }
+    #explainer footer kbd {
+      background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+      border: 1px solid var(--divider); font-family: inherit;
+    }
+    #explainer.collapsed ol, #explainer.collapsed footer { display: none; }
+  </style>
+</head>
+<body>
+  <div
+    id="stage"
+    class="stage"
+    data-composition-id="engram-session-flow"
+    data-width="1920"
+    data-height="800"
+    data-duration="11"
+    data-fps="30"
+    style="width:1920px;height:800px;"
+  >
+    <div class="win clip" data-start="0" data-duration="11" data-track-index="0">
+
+      <!-- zsh shell prompt -->
+      <div class="shell" id="shell">
+        <span class="path">~/p/claude-engram</span>
+        <span class="sep">|</span>
+        <span class="branch">main</span>
+        <span class="dirty" id="dirty"></span>
+        <span class="cmd" id="cmd"></span>
+        <span class="right"><span id="int-label"></span><span class="time" id="time">08:12:04</span></span>
+      </div>
+
+      <!-- Claude Code banner -->
+      <div class="cc" id="cc">
+        <div class="logo"> ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝</div>
+        <div class="info">
+          <div class="title">Claude Code v2.1.112</div>
+          <div class="model">Opus 4.7 (1M context) with xhigh effort · Claude Team</div>
+          <div class="cwd">~/personal/claude-engram</div>
+        </div>
+      </div>
+
+      <!-- engram hook output -->
+      <div class="engram">
+        <div class="stats" id="stats">
+          <span class="tree">⎿</span><span class="hook">SessionStart:startup says: </span><span class="kw">engram</span><span class="dot">·</span><span class="proj">claude-engram</span><span class="dot">·</span><span class="num" id="sessions">48</span> sessions<span class="dot">·</span>last <span id="since">12h</span> ago<span class="dot">·</span><span class="num" id="memories">195</span> memories
+        </div>
+        <div class="bullet" id="b-status"><span class="dash">-</span><span class="label">status:</span><span class="v" id="v-status">Tier 1 stable, 101 tests passing, clean tree</span></div>
+        <div class="bullet" id="b-last"><span class="dash">-</span><span class="label">last change:</span><span class="v" id="v-last">banner format refactor (stats + bullets)</span></div>
+        <div class="bullet" id="b-next"><span class="dash">-</span><span class="label">next:</span><span class="v" id="v-next">add memdoctor signal tests before Tier 2</span></div>
+      </div>
+
+      <div class="hr"></div>
+      <div class="input" id="input">
+        <span class="car">❯</span><span class="typed" id="typed"></span><span class="cursor"></span>
+      </div>
+      <div class="hr"></div>
+
+      <!-- status bar -->
+      <div class="status" id="status">
+        <span class="model">[Opus 4.7 (1M context)]</span>
+        <span class="bar"><span class="fill" id="fill"></span></span>
+        <span class="pct" id="pct">0%</span>
+        <span>|</span>
+        <span class="git">claude-engram git:(<span>main</span><span class="star" id="git-star"></span>)</span>
+        <span class="usage-wrap">
+          <span>Usage <span id="usage">47%</span></span>
+          <span>|</span>
+          <span class="effort">◉ xhigh · /effort</span>
+        </span>
+      </div>
+
+      <!-- gap overlay -->
+      <div class="gap-label" id="gap-label">2 hours later…</div>
+    </div>
+
+    <div id="caption" class="caption clip" data-start="9.0" data-duration="2.0" data-track-index="1">
+      <span class="arrow">↳</span>49 sessions later, context is waiting — <span class="hi">zero effort</span>
+    </div>
+  </div>
+
+  <aside id="explainer" aria-hidden="true">
+    <header>
+      <span><strong>how it works</strong><span class="sub">session flow · 11s</span></span>
+      <button id="expl-toggle" title="toggle (e)">▾</button>
+    </header>
+    <ol>
+      <li data-t="0.0"><span class="t">0.0s</span>Session 1 — user types <code>claude</code> in the shell</li>
+      <li data-t="0.65"><span class="t">0.7s</span>Claude Code boots (Opus 4.7, xhigh)</li>
+      <li data-t="1.15"><span class="t">1.1s</span><span class="tag">SessionStart:startup</span> fires the engram hook — banner renders</li>
+      <li data-t="1.45"><span class="t">1.4s</span>3-bullet executive: <span class="hi">status · last change · next</span> (48 sessions, 195 memories)</li>
+      <li data-t="2.55"><span class="t">2.5s</span>User types a prompt that follows the <em>next</em> bullet</li>
+      <li data-t="4.0"><span class="t">4.0s</span>Session ends — <span class="hi">2 hours pass</span></li>
+      <li data-t="5.7"><span class="t">5.7s</span>Session 2 — <code>claude</code> again on a fresh shell</li>
+      <li data-t="6.6"><span class="t">6.6s</span>Banner now shows <span class="hi">49 sessions · 196 memories</span> (+1 each)</li>
+      <li data-t="7.2"><span class="t">7.2s</span><em>last change</em> bullet is highlighted — it's what Session 1 did</li>
+      <li data-t="9.0"><span class="t">9.0s</span>Caption: Claude picks up where you left off, zero effort</li>
+    </ol>
+    <footer>click stage to replay · press <kbd>e</kbd> to collapse</footer>
+  </aside>
+
+  <script>
+    const tl = gsap.timeline({ paused: true, defaults: { ease: 'power2.out' } });
+
+    function typewriter(elId, text, startTime, duration) {
+      const el = document.getElementById(elId);
+      el.textContent = '';
+      const chars = text.split('');
+      const step = duration / Math.max(chars.length, 1);
+      chars.forEach((c, i) => {
+        tl.call(() => { el.textContent += c; }, [], startTime + i * step);
+      });
+    }
+    function setText(id, text, t) { tl.call(() => { document.getElementById(id).textContent = text; }, [], t); }
+    function setAttr(id, prop, val, t) { tl.call(() => { document.getElementById(id).style[prop] = val; }, [], t); }
+
+    /* ──────── SESSION 1 (0 – 4s) ──────── */
+    // user types "claude" in zsh prompt
+    typewriter('cmd', 'claude', 0.1, 0.35);
+    tl.call(() => { document.getElementById('int-label').textContent = 'INT'; }, [], 0.5);
+
+    // Claude Code banner appears
+    tl.fromTo('#cc', { y: 6, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, 0.65);
+
+    // engram stats line (48 sessions, 12h ago, 195 memories)
+    tl.fromTo('#stats', { opacity: 0 }, { opacity: 1, duration: 0.3 }, 1.15);
+
+    // three bullets cascade
+    tl.fromTo('#b-status', { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3 }, 1.45);
+    tl.fromTo('#b-last',   { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3 }, 1.7);
+    tl.fromTo('#b-next',   { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3 }, 1.95);
+
+    // input + status bar settle
+    tl.fromTo('#input',  { opacity: 0 }, { opacity: 1, duration: 0.3 }, 2.2);
+    tl.fromTo('#status', { opacity: 0 }, { opacity: 1, duration: 0.3 }, 2.3);
+
+    // user types a real prompt that reflects the "next" bullet
+    typewriter('typed', 'agregá tests para memdoctor signals', 2.55, 1.1);
+
+    // progress bar ticks up as Claude works
+    tl.to('#fill', { width: '62%', duration: 0.8 }, 3.0);
+    setText('pct', '62%', 3.0);
+
+    /* ──────── GAP (4 – 5.6s): session ends, 2h pass ──────── */
+    tl.to('.win', { opacity: 0.25, duration: 0.35 }, 4.0);
+    tl.fromTo('#gap-label', { opacity: 0 }, { opacity: 1, duration: 0.4 }, 4.25);
+    tl.to('#gap-label', { opacity: 0, duration: 0.35 }, 5.2);
+
+    // ── reset for session 2 while screen is dark
+    tl.call(() => {
+      document.getElementById('cmd').textContent = '';
+      document.getElementById('typed').textContent = '';
+      document.getElementById('int-label').textContent = '';
+      document.getElementById('time').textContent = '10:25:17';
+      document.getElementById('dirty').textContent = '?3';            // untracked files appeared
+      document.getElementById('sessions').textContent = '49';         // +1 session
+      document.getElementById('since').textContent = '2h';            // gap elapsed
+      document.getElementById('memories').textContent = '196';        // +1 memory
+      document.getElementById('v-status').textContent = 'Tier 1 complete, 106 tests passing, clean tree';
+      document.getElementById('v-last').textContent = 'memdoctor signal tests added · 5 signals landed';
+      document.getElementById('v-next').textContent = 'triage untracked eval/ + tools/eval_corrections.py → Tier 2';
+      document.getElementById('fill').style.width = '0%';
+      document.getElementById('pct').textContent = '0%';
+      document.getElementById('git-star').textContent = '*';          // git dirty
+    }, [], 5.35);
+
+    // reset per-element opacities
+    tl.set(['#cc', '#stats', '#b-status', '#b-last', '#b-next', '#input', '#status'], { opacity: 0 }, 5.35);
+
+    /* ──────── SESSION 2 (5.6 – 11s) ──────── */
+    tl.to('.win', { opacity: 1, duration: 0.3 }, 5.5);
+
+    typewriter('cmd', 'claude', 5.7, 0.3);
+    tl.call(() => { document.getElementById('int-label').textContent = 'INT'; }, [], 6.0);
+
+    tl.fromTo('#cc', { y: 6, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 6.15);
+    tl.fromTo('#stats', { opacity: 0 }, { opacity: 1, duration: 0.3 }, 6.6);
+
+    // cascade bullets — this time "last" is highlighted (it references what session 1 did)
+    tl.fromTo('#b-status', { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3 }, 6.95);
+    tl.call(() => { document.getElementById('b-last').classList.add('hi'); }, [], 7.2);
+    tl.fromTo('#b-last',   { x: -10, opacity: 0, scale: 1.0 }, { x: 0, opacity: 1, duration: 0.35 }, 7.25);
+    tl.fromTo('#b-next',   { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3 }, 7.65);
+
+    tl.fromTo('#input',  { opacity: 0 }, { opacity: 1, duration: 0.25 }, 7.9);
+    tl.fromTo('#status', { opacity: 0 }, { opacity: 1, duration: 0.25 }, 8.0);
+
+    // subtle pulse on "last" bullet — the payoff
+    tl.fromTo('#b-last', { filter: 'brightness(1)' }, { filter: 'brightness(1.35)', duration: 0.35, yoyo: true, repeat: 1 }, 7.75);
+
+    // caption lands
+    tl.fromTo('#caption', { y: 8, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5 }, 9.0);
+
+    tl.to({}, { duration: 0.01 }, 10.99);
+
+    window.__timelines = window.__timelines || {};
+    window.__timelines['engram-session-flow'] = tl;
+
+    // Preview helpers (not used by HyperFrames render)
+    function fitStage() {
+      const stage = document.getElementById('stage');
+      const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      stage.style.transform = `scale(${scale})`;
+    }
+    const isPreview = window.innerWidth !== 1920 || window.innerHeight !== 1080;
+    if (isPreview) {
+      document.body.classList.add('preview');
+      fitStage();
+      window.addEventListener('resize', fitStage);
+      window.addEventListener('load', () => tl.restart());
+      document.addEventListener('click', (e) => {
+        if (e.target.closest('#explainer')) return;
+        tl.restart();
+      });
+
+      const expl = document.getElementById('explainer');
+      const steps = [...expl.querySelectorAll('li')];
+      document.getElementById('expl-toggle').addEventListener('click', (e) => {
+        e.stopPropagation();
+        expl.classList.toggle('collapsed');
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'e' || e.key === 'E') expl.classList.toggle('collapsed');
+      });
+      gsap.ticker.add(() => {
+        const t = tl.time();
+        let active = -1;
+        for (let i = 0; i < steps.length; i++) {
+          if (parseFloat(steps[i].dataset.t) <= t) active = i;
+        }
+        steps.forEach((el, i) => el.classList.toggle('active', i === active));
+      });
+    }
+  </script>
+</body>
+</html>

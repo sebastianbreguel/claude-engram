@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>engram — hero (day 1 capture → day 2 split)</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --panel-bg: #0d1016;
+      --panel-bg-mem: #0f1218;
+      --fg: #d7dbe0;
+      --dim: #6b7280;
+      --muted: #9aa3ad;
+      --accent: #7ee787;
+      --claude: #ff9161;
+      --blue: #79c0ff;
+      --branch: #a6d8ff;
+      --yellow: #e3b341;
+      --magenta: #c57bdb;
+      --highlight: #f7e27a;
+      --red: #ff8183;
+      --divider: #1f242c;
+    }
+    html, body {
+      margin: 0; padding: 0; background: var(--bg);
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+      color: var(--fg); overflow: hidden;
+    }
+    .stage {
+      position: relative; overflow: hidden; transform-origin: top left;
+      background: var(--bg);
+      box-sizing: border-box;
+    }
+    .frame {
+      position: absolute; top: 48px; left: 56px;
+      width: 1808px; height: 984px;
+    }
+
+    /* ── panel (terminal window) ── */
+    .panel {
+      position: absolute; top: 0;
+      width: 880px; height: 984px;
+      padding: 24px 28px 20px; box-sizing: border-box;
+      display: flex; flex-direction: column;
+      background: var(--panel-bg);
+      border: 1px solid var(--divider);
+      border-radius: 8px;
+      font-size: 19px; line-height: 1.5;
+    }
+    #panel-L { left: 0; }
+    #panel-R { left: 928px; }
+
+    /* window chrome */
+    .chrome {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--dim); margin-bottom: 14px; padding-bottom: 10px;
+      border-bottom: 1px solid var(--divider);
+    }
+    .chrome .pill {
+      padding: 3px 10px; border-radius: 999px;
+      border: 1px solid var(--divider); font-size: 11px;
+    }
+    .chrome .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--claude); }
+    .panel-bad .chrome .dot { background: var(--red); }
+    .panel-ok  .chrome .dot { background: var(--accent); }
+    .panel-mem .chrome .dot { background: var(--magenta); }
+    .chrome .lbl { margin-right: auto; }
+    .chrome .t { color: var(--dim); font-size: 12px; letter-spacing: 0.06em; text-transform: none; }
+
+    /* zsh prompt */
+    .shell {
+      display: flex; align-items: baseline; gap: 8px;
+      font-size: 19px; margin-bottom: 14px;
+    }
+    .shell .path { color: var(--blue); font-weight: 500; }
+    .shell .sep { color: var(--divider); }
+    .shell .branch { color: var(--branch); }
+    .shell .dirty { color: var(--yellow); margin-left: 4px; }
+    .shell .cmd { color: var(--fg); margin-left: 10px; }
+    .shell .int { margin-left: auto; color: var(--magenta); font-size: 15px; }
+
+    /* Claude banner */
+    .cc {
+      display: grid; grid-template-columns: auto 1fr; gap: 18px;
+      margin-bottom: 16px; opacity: 0;
+    }
+    .cc .logo {
+      color: var(--claude); font-size: 18px; line-height: 1.1;
+      white-space: pre; letter-spacing: -0.02em; margin-top: 2px;
+    }
+    .cc .info { display: flex; flex-direction: column; gap: 2px; }
+    .cc .info .title { color: var(--fg); font-weight: 600; font-size: 19px; }
+    .cc .info .model { color: var(--muted); font-size: 16px; }
+    .cc .info .cwd { color: var(--dim); font-size: 15px; }
+
+    /* engram stats line (terminal Day 2 only) */
+    .engram { font-size: 19px; margin-bottom: 12px; }
+    .stats { opacity: 0; color: var(--muted); margin-bottom: 4px; font-size: 16px; }
+    .stats .tree { color: var(--divider); margin-right: 8px; }
+    .stats .kw { color: var(--accent); font-weight: 600; }
+    .stats .proj { color: var(--blue); }
+    .stats .num { color: var(--fg); }
+    .stats .dot { color: var(--divider); margin: 0 6px; }
+
+    .bullet {
+      display: flex; padding-left: 28px;
+      color: var(--fg); margin-bottom: 3px; opacity: 0; font-size: 17px;
+    }
+    .bullet .dash { color: var(--dim); margin-right: 8px; }
+    .bullet .label { color: var(--muted); margin-right: 6px; }
+    .bullet .v { color: var(--fg); }
+    .bullet.hi .v, .bullet.hi .label { color: var(--highlight); }
+
+    /* vanilla "no context" (left Day 2) */
+    .no-ctx {
+      opacity: 0; color: var(--dim);
+      font-size: 17px; margin-bottom: 8px; font-style: italic;
+    }
+    .no-ctx .lbl { color: var(--red); font-style: normal; font-weight: 600; margin-right: 8px; }
+
+    .reply {
+      opacity: 0; margin-top: 6px;
+      color: var(--muted); font-size: 17px; line-height: 1.5;
+    }
+    .reply .car { color: var(--claude); margin-right: 8px; }
+
+    /* scrollback wrapper — pins content (echo + response) to bottom, right above input */
+    .scrollback {
+      flex: 1 1 auto;
+      display: flex; flex-direction: column;
+      justify-content: flex-end;
+      min-height: 0;
+      gap: 2px;
+    }
+
+    /* echoed user prompt — appears above the response, in scrollback */
+    .echo {
+      opacity: 0;
+      font-size: 17px;
+      margin-bottom: 6px;
+    }
+    .echo .car { color: var(--muted); margin-right: 8px; }
+    .echo .text { color: var(--fg); }
+
+    /* work output (Day 1 left, Day 2 right) */
+    .work {
+      opacity: 0; margin-top: 4px; font-size: 16px; color: var(--muted); line-height: 1.6;
+    }
+    .work .row { display: flex; gap: 10px; margin-bottom: 2px; opacity: 0; }
+    .work .row .tree { color: var(--divider); }
+    .work .row .act  { color: var(--accent); min-width: 42px; }
+    .work .row .act.edit { color: var(--yellow); }
+    .work .row .act.bash { color: var(--magenta); }
+    .work .row .path { color: var(--blue); }
+    .work .row .plus { color: var(--accent); }
+    .work .row .pass { color: var(--accent); font-weight: 600; }
+
+    /* dividers + input */
+    .hr { height: 1px; background: var(--divider); margin: 8px 0; }
+    .input {
+      font-size: 19px; padding: 10px 0;
+      color: var(--fg); opacity: 0;
+    }
+    .input .car { color: var(--fg); margin-right: 8px; }
+    .input .typed { color: var(--fg); }
+    .cursor {
+      display: inline-block; width: 9px; height: 19px; background: var(--fg);
+      vertical-align: text-bottom; margin-left: 2px;
+      animation: blink 1s steps(2, start) infinite;
+    }
+    @keyframes blink { to { visibility: hidden; } }
+
+    /* status bar */
+    .status {
+      margin-top: auto; display: flex; align-items: center;
+      font-size: 15px; color: var(--dim); gap: 10px;
+      padding-top: 8px;
+    }
+    .status .model { color: var(--muted); }
+    .status .bar {
+      display: inline-block; width: 110px; height: 12px; background: #151b23;
+      border-radius: 2px; overflow: hidden; vertical-align: middle;
+    }
+    .status .bar .fill { display: block; height: 100%; background: var(--muted); width: 0%; }
+    .panel-ok .status .bar .fill { background: var(--accent); }
+    .panel-d1 .status .bar .fill { background: var(--claude); }
+    .status .pct { color: var(--muted); }
+    .status .usage { margin-left: auto; }
+
+    /* ── RIGHT panel Day 1: engram memory view ── */
+    .mem-view {
+      opacity: 0;
+      display: flex; flex-direction: column; gap: 12px;
+      height: 100%;
+    }
+    .mem-head {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 6px 0 10px; border-bottom: 1px solid var(--divider);
+      margin-bottom: 4px;
+    }
+    .mem-head .brand {
+      color: var(--claude); font-weight: 600; font-size: 19px; letter-spacing: -0.01em;
+    }
+    .mem-head .sub {
+      color: var(--dim); font-size: 14px; letter-spacing: 0.04em;
+    }
+    .mem-head .count {
+      margin-left: auto; color: var(--muted); font-size: 16px;
+    }
+    .mem-head .count .n { color: var(--fg); font-weight: 600; }
+
+    .mem-panel-title {
+      font-size: 13px; color: var(--dim);
+      letter-spacing: 0.2em; text-transform: uppercase; margin-top: 4px; margin-bottom: 2px;
+    }
+
+    .mem-db {
+      font-size: 15px; color: var(--muted);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .mem-db .path { color: var(--blue); }
+    .mem-db .arr { color: var(--dim); }
+
+    /* streaming memory entries */
+    .mem-stream { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    .mem-entry {
+      opacity: 0;
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.02);
+      border-left: 2px solid var(--divider);
+      border-radius: 0 4px 4px 0;
+      font-size: 16px;
+    }
+    .mem-entry.t-user     { border-left-color: var(--blue); }
+    .mem-entry.t-feedback { border-left-color: var(--yellow); }
+    .mem-entry.t-project  { border-left-color: var(--claude); }
+    .mem-entry.t-ref      { border-left-color: var(--magenta); }
+    .mem-entry .plus { color: var(--accent); font-weight: 600; margin-right: 2px; }
+    .mem-entry .kind {
+      font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--divider);
+      color: var(--dim); flex-shrink: 0;
+    }
+    .mem-entry.t-user     .kind { color: var(--blue); border-color: rgba(121,192,255,0.35); }
+    .mem-entry.t-feedback .kind { color: var(--yellow); border-color: rgba(227,179,65,0.35); }
+    .mem-entry.t-project  .kind { color: var(--claude); border-color: rgba(255,145,97,0.35); }
+    .mem-entry.t-ref      .kind { color: var(--magenta); border-color: rgba(197,123,219,0.35); }
+    .mem-entry .body { color: var(--fg); line-height: 1.45; flex: 1; }
+
+    /* executive cache card */
+    .mem-exec {
+      opacity: 0;
+      margin-top: 8px;
+      padding: 12px 14px;
+      border: 1px solid var(--divider);
+      border-radius: 6px;
+      background: rgba(255,145,97,0.04);
+    }
+    .mem-exec .title {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--claude);
+      letter-spacing: 0.14em; text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .mem-exec .path {
+      font-size: 13px; color: var(--dim); font-weight: 400;
+      letter-spacing: 0; text-transform: none; margin-left: auto;
+    }
+    .mem-exec .line {
+      font-size: 15px; color: var(--fg); padding-left: 4px;
+      opacity: 0; line-height: 1.5;
+    }
+    .mem-exec .line .k { color: var(--muted); margin-right: 8px; }
+
+    /* Day 1 → Day 2 gap overlay */
+    .gap-label {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 48px; color: var(--fg); letter-spacing: 0.14em; text-transform: uppercase;
+      opacity: 0; pointer-events: none; background: rgba(12,14,18,0.92);
+      z-index: 8;
+    }
+    .gap-label .sub { color: var(--muted); font-size: 22px; letter-spacing: 0.22em; margin-top: 12px; }
+    .gap-label .stack { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+
+    /* vs divider */
+    .vs {
+      position: absolute; top: 0; bottom: 0; left: 880px;
+      width: 48px; display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+    }
+    .vs .line {
+      width: 1px; height: 720px;
+      background: linear-gradient(180deg, transparent 0%, var(--divider) 20%, var(--divider) 80%, transparent 100%);
+    }
+    .vs .tag {
+      position: absolute; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: var(--dim); background: var(--bg); padding: 6px 4px; writing-mode: vertical-rl;
+    }
+
+    /* close card */
+    .close-card {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 28px;
+      opacity: 0; pointer-events: none; z-index: 9;
+      background: var(--bg);
+    }
+    .close-card .logo-big {
+      color: var(--claude); font-size: 56px; line-height: 1.05;
+      white-space: pre; letter-spacing: -0.02em;
+      text-align: center; margin-bottom: 8px;
+    }
+    .close-card .name {
+      font-size: 48px; color: var(--fg); letter-spacing: -0.02em; font-weight: 500;
+    }
+    .close-card .name .dot { color: var(--claude); margin: 0 6px; }
+    .close-card .row {
+      display: flex; gap: 52px; font-size: 26px; color: var(--muted);
+    }
+    .close-card .row .n { color: var(--fg); font-weight: 600; margin-right: 8px; }
+    .close-card .install {
+      margin-top: 12px;
+      font-size: 24px; color: var(--muted);
+      padding: 14px 26px; border: 1px solid var(--divider); border-radius: 8px;
+      background: rgba(255,145,97,0.05);
+    }
+    .close-card .install .prompt { color: var(--claude); margin-right: 10px; }
+    .close-card .install .cmd { color: var(--fg); }
+
+    /* close transition mask */
+    .scene-mask {
+      position: absolute; inset: 0; background: var(--bg);
+      opacity: 0; pointer-events: none; z-index: 8;
+    }
+
+    /* captions */
+    .caption {
+      position: absolute; left: 0; right: 0; bottom: 18px;
+      text-align: center; font-size: 22px; color: var(--muted); opacity: 0;
+      z-index: 7;
+    }
+    .caption .hi { color: var(--claude); }
+    .caption .ok { color: var(--accent); }
+    .caption .bad { color: var(--red); }
+
+    /* preview-only explainer */
+    #explainer {
+      display: none; position: fixed; right: 16px; top: 16px;
+      width: 400px; max-height: calc(100vh - 32px);
+      background: rgba(19,23,28,0.96);
+      border: 1px solid var(--divider);
+      border-radius: 10px;
+      color: var(--fg);
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+      font-size: 13px; line-height: 1.55;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+      z-index: 50; overflow: hidden;
+      backdrop-filter: blur(4px);
+    }
+    body.preview #explainer { display: block; }
+    #explainer header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-bottom: 1px solid var(--divider);
+      background: rgba(0,0,0,0.25);
+    }
+    #explainer header strong { color: var(--claude); font-weight: 600; letter-spacing: 0.04em; }
+    #explainer header .sub { color: var(--dim); font-size: 11px; margin-left: 10px; }
+    #explainer header button {
+      background: transparent; border: 0; color: var(--muted);
+      cursor: pointer; font-size: 14px; font-family: inherit; padding: 0 4px;
+    }
+    #explainer ol { margin: 0; padding: 12px 14px 12px 36px; max-height: 55vh; overflow-y: auto; }
+    #explainer li { margin: 0 0 10px 0; color: var(--muted); transition: color 0.2s ease; }
+    #explainer li .t {
+      color: var(--dim); font-weight: 600; margin-right: 8px;
+      display: inline-block; min-width: 48px;
+    }
+    #explainer li.active { color: var(--fg); }
+    #explainer li.active .t { color: var(--claude); }
+    #explainer li .hi { color: var(--claude); }
+    #explainer li .ok { color: var(--accent); }
+    #explainer li .bad { color: var(--red); }
+    #explainer li .tag { color: var(--blue); }
+    #explainer li code {
+      background: rgba(255,255,255,0.05); padding: 1px 5px; border-radius: 3px;
+      font-family: inherit; color: var(--fg); font-size: 12px;
+    }
+    #explainer footer { padding: 8px 14px; border-top: 1px solid var(--divider); font-size: 11px; color: var(--dim); }
+    #explainer footer kbd {
+      background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+      border: 1px solid var(--divider); font-family: inherit;
+    }
+    #explainer.collapsed ol, #explainer.collapsed footer { display: none; }
+  </style>
+</head>
+<body>
+  <div
+    id="stage"
+    class="stage"
+    data-composition-id="engram-hero"
+    data-width="1920"
+    data-height="800"
+    data-duration="23"
+    data-fps="30"
+    style="width:1920px;height:800px;"
+  >
+    <div class="frame clip" data-start="0" data-duration="23" data-track-index="0">
+
+      <!-- ─────────── LEFT PANEL (Day 1 session → Day 2 without engram) ─────────── -->
+      <section id="panel-L" class="panel panel-d1">
+        <div class="chrome">
+          <span class="dot"></span>
+          <span class="lbl" id="L-lbl">day 1 · Claude Code session</span>
+          <span class="t" id="L-time">09:04:17</span>
+          <span class="pill" id="L-pill">Mon</span>
+        </div>
+
+        <div class="shell">
+          <span class="path">~/p/claude-engram</span>
+          <span class="sep">|</span>
+          <span class="branch">main</span>
+          <span class="dirty" id="L-dirty"></span>
+          <span class="cmd" id="L-cmd"></span>
+          <span class="int" id="L-int"></span>
+        </div>
+
+        <div class="cc" id="L-cc">
+          <div class="logo"> ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝</div>
+          <div class="info">
+            <div class="title">Claude Code v2.1.112</div>
+            <div class="model">Opus 4.7 · xhigh effort</div>
+            <div class="cwd">~/personal/claude-engram</div>
+          </div>
+        </div>
+
+        <!-- Day 2 vanilla marker (outside scrollback — shown below banner) -->
+        <div class="no-ctx" id="L-noctx">
+          <span class="lbl">(no context)</span>fresh shell · no memory of prior sessions
+        </div>
+
+        <!-- scrollback: echo above, response below, all pinned right above input -->
+        <div class="scrollback">
+          <div class="echo" id="L-echo">
+            <span class="car">❯</span><span class="text" id="L-echo-text"></span>
+          </div>
+
+          <!-- Day 1 productive work -->
+          <div class="work" id="L-work">
+            <div class="row"><span class="tree">⎿</span><span class="act">Read</span><span class="path">tools/memdoctor.py</span></div>
+            <div class="row"><span class="tree">⎿</span><span class="act edit">Edit</span><span class="path">tests/test_memdoctor.py</span><span class="plus">+78 lines</span></div>
+            <div class="row"><span class="tree">⎿</span><span class="act bash">Bash</span><span>uv run pytest</span><span class="pass">✓ 106 passed</span></div>
+          </div>
+
+          <!-- Day 2 reply -->
+          <div class="reply" id="L-reply">
+            <span class="car">✦</span><span id="L-reply-text"></span>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+        <div class="input" id="L-input">
+          <span class="car">❯</span><span class="typed" id="L-typed"></span><span class="cursor"></span>
+        </div>
+        <div class="hr"></div>
+
+        <div class="status" id="L-status">
+          <span class="model">[Opus 4.7]</span>
+          <span class="bar"><span class="fill" id="L-fill"></span></span>
+          <span class="pct" id="L-pct">0%</span>
+          <span class="usage">Usage <span id="L-usage">47%</span></span>
+        </div>
+      </section>
+
+      <!-- ─────────── RIGHT PANEL (Day 1 memory capture → Day 2 with engram) ─────────── -->
+      <section id="panel-R" class="panel panel-mem">
+        <div class="chrome">
+          <span class="dot"></span>
+          <span class="lbl" id="R-lbl">engram · memory capture</span>
+          <span class="t" id="R-time">live</span>
+          <span class="pill" id="R-pill">claude-engram</span>
+        </div>
+
+        <!-- Day 1 view: memory stream -->
+        <div class="mem-view" id="R-mem">
+          <div class="mem-head">
+            <span class="brand">engram</span>
+            <span class="sub">SessionEnd:stop hook</span>
+            <span class="count">memories <span class="n" id="R-count">192</span></span>
+          </div>
+
+          <div class="mem-db">
+            <span>📂</span><span class="path">~/.claude/memory.db</span><span class="arr">→</span><span>SQLite</span>
+          </div>
+
+          <div class="mem-panel-title">stream</div>
+          <div class="mem-stream">
+            <div class="mem-entry t-user" id="R-e1">
+              <span class="plus">+</span><span class="kind">user</span>
+              <span class="body">preference: <span style="color:var(--muted)">productive coding on claude-engram project</span></span>
+            </div>
+            <div class="mem-entry t-feedback" id="R-e2">
+              <span class="plus">+</span><span class="kind">feedback</span>
+              <span class="body">no mocked DBs in tests <span style="color:var(--dim)">— prior incident, use real pytest</span></span>
+            </div>
+            <div class="mem-entry t-project" id="R-e3">
+              <span class="plus">+</span><span class="kind">project</span>
+              <span class="body">memdoctor signal tests added <span style="color:var(--dim)">· 5 signals landed</span></span>
+            </div>
+            <div class="mem-entry t-ref" id="R-e4">
+              <span class="plus">+</span><span class="kind">reference</span>
+              <span class="body">next: triage <span style="color:var(--yellow)">eval/</span> + wire hero demo</span>
+            </div>
+          </div>
+
+          <div class="mem-exec" id="R-exec">
+            <div class="title">
+              <span>✓ executive saved</span>
+              <span class="path" id="R-exec-path">~/.claude/engram/executive/claude-engram.md</span>
+            </div>
+            <div class="line" id="R-exec-l1"><span class="k">- status:</span>Tier 1 complete · 106 tests passing</div>
+            <div class="line" id="R-exec-l2"><span class="k">- last change:</span>memdoctor signal tests · 5 signals landed</div>
+            <div class="line" id="R-exec-l3"><span class="k">- next:</span>triage eval/ + wire hero demo</div>
+          </div>
+        </div>
+
+        <!-- Day 2 view: terminal with engram (hidden until Day 2) -->
+        <div id="R-term" style="display:none; flex-direction:column; height:100%;">
+          <div class="shell">
+            <span class="path">~/p/claude-engram</span>
+            <span class="sep">|</span>
+            <span class="branch">main</span>
+            <span class="dirty">?2</span>
+            <span class="cmd" id="R-cmd"></span>
+            <span class="int" id="R-int"></span>
+          </div>
+
+          <div class="cc" id="R-cc">
+            <div class="logo"> ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝</div>
+            <div class="info">
+              <div class="title">Claude Code v2.1.112</div>
+              <div class="model">Opus 4.7 · xhigh effort</div>
+              <div class="cwd">~/personal/claude-engram</div>
+            </div>
+          </div>
+
+          <div class="engram">
+            <div class="stats" id="R-stats">
+              <span class="tree">⎿</span><span>SessionStart:startup says: </span><span class="kw">engram</span><span class="dot">·</span><span class="proj">claude-engram</span><span class="dot">·</span><span class="num">49</span> sessions<span class="dot">·</span>last 18h ago<span class="dot">·</span><span class="num">196</span> memories
+            </div>
+            <div class="bullet" id="R-b1"><span class="dash">-</span><span class="label">status:</span><span class="v">Tier 1 complete · 106 tests passing</span></div>
+            <div class="bullet" id="R-b2"><span class="dash">-</span><span class="label">last change:</span><span class="v">memdoctor signal tests · 5 signals landed</span></div>
+            <div class="bullet" id="R-b3"><span class="dash">-</span><span class="label">next:</span><span class="v">triage <span style="color:var(--yellow)">eval/</span> + wire hero demo</span></div>
+          </div>
+
+          <div class="scrollback">
+            <div class="echo" id="R-echo">
+              <span class="car">❯</span><span class="text" id="R-echo-text"></span>
+            </div>
+
+            <div class="work" id="R-work">
+              <div class="row"><span class="tree">⎿</span><span class="act">Read</span><span class="path">tools/eval_corrections.py</span></div>
+              <div class="row"><span class="tree">⎿</span><span class="act edit">Edit</span><span class="path">demo/engram-hero.html</span><span class="plus">+42 lines</span></div>
+              <div class="row"><span class="tree">⎿</span><span class="act bash">Bash</span><span>npx hyperframes lint</span><span class="pass">✓ clean</span></div>
+            </div>
+          </div>
+
+          <div class="hr"></div>
+          <div class="input" id="R-input">
+            <span class="car">❯</span><span class="typed" id="R-typed"></span><span class="cursor"></span>
+          </div>
+          <div class="hr"></div>
+
+          <div class="status" id="R-status">
+            <span class="model">[Opus 4.7]</span>
+            <span class="bar"><span class="fill" id="R-fill"></span></span>
+            <span class="pct" id="R-pct">0%</span>
+            <span class="usage">Usage <span id="R-usage">47%</span></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- vs divider (Day 2 only) -->
+      <div class="vs" id="vs">
+        <div class="line"></div>
+        <div class="tag">vs</div>
+      </div>
+
+      <!-- Day 1 → Day 2 gap overlay -->
+      <div class="gap-label" id="gap">
+        <div class="stack">
+          <div>— next day —</div>
+          <div class="sub">same project · fresh shell</div>
+        </div>
+      </div>
+
+      <!-- captions -->
+      <div id="cap-d1" class="caption clip" data-start="4.8" data-duration="1.8" data-track-index="4">
+        <span class="hi">Day 1</span> — everything you just did got <span class="hi">remembered</span>
+      </div>
+      <div id="cap-d2" class="caption clip" data-start="12.2" data-duration="2.6" data-track-index="5">
+        <span class="bad">✗ without</span> Claude forgets  &nbsp;·&nbsp;  <span class="ok">✓ with engram</span> context loads itself
+      </div>
+    </div>
+
+    <div class="scene-mask" id="mask"></div>
+
+    <div class="close-card clip" id="close" data-start="18.5" data-duration="4.5" data-track-index="3">
+      <div class="logo-big"> ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝</div>
+      <div class="name">claude<span class="dot">·</span>engram</div>
+      <div class="row">
+        <span><span class="n">49</span>sessions</span>
+        <span><span class="n">196</span>memories</span>
+        <span><span class="n" style="color:var(--accent)">0</span>effort</span>
+      </div>
+      <div class="install"><span class="prompt">❯</span><span class="cmd" id="install-cmd"></span><span class="cursor"></span></div>
+    </div>
+  </div>
+
+  <aside id="explainer" aria-hidden="true">
+    <header>
+      <span><strong>how it works</strong><span class="sub">day 1 capture → day 2 split · 23s</span></span>
+      <button id="expl-toggle" title="toggle (e)">▾</button>
+    </header>
+    <ol>
+      <li data-t="0.0"><span class="t">0.0s</span>Split live: <span class="hi">left = user session</span> · <span class="hi">right = engram capturing</span></li>
+      <li data-t="0.6"><span class="t">0.6s</span>LEFT boots Claude Code · RIGHT shows engram memory view</li>
+      <li data-t="2.0"><span class="t">2.0s</span>LEFT: user types <em>"agregá tests para memdoctor signals"</em></li>
+      <li data-t="3.4"><span class="t">3.4s</span>LEFT: work streams · RIGHT: <span class="ok">memory entries cascade</span> in real time</li>
+      <li data-t="4.8"><span class="t">4.8s</span>Caption: <span class="hi">everything you just did got remembered</span></li>
+      <li data-t="5.5"><span class="t">5.5s</span>RIGHT: <span class="ok">✓ executive saved</span> → 3 bullets written to <code>~/.claude/engram/executive/</code></li>
+      <li data-t="6.8"><span class="t">6.8s</span><span class="tag">— next day —</span> overlay · same project · fresh shell</li>
+      <li data-t="8.0"><span class="t">8.0s</span>LEFT chip → <span class="bad">day 2 · without engram</span> · RIGHT morphs to terminal <span class="ok">day 2 · with engram</span></li>
+      <li data-t="8.8"><span class="t">8.8s</span>Both boot Claude Code</li>
+      <li data-t="9.4"><span class="t">9.4s</span>LEFT types <em>"where were we?"</em></li>
+      <li data-t="9.6"><span class="t">9.6s</span>RIGHT: <span class="tag">SessionStart:startup</span> fires — loads the memories we saw captured</li>
+      <li data-t="10.0"><span class="t">10.0s</span>RIGHT: <span class="hi">same 3 bullets</span> from Day 1 appear as executive</li>
+      <li data-t="10.8"><span class="t">10.8s</span>LEFT: <em>"I don't have context from previous sessions."</em></li>
+      <li data-t="11.8"><span class="t">11.8s</span>RIGHT: user continues Day 1's <code>next:</code> directly</li>
+      <li data-t="13.5"><span class="t">13.5s</span>RIGHT: work streams · progress climbs</li>
+      <li data-t="18.5"><span class="t">18.5s</span>Mask fade → close: stats + <code>/plugin install claude-engram</code></li>
+    </ol>
+    <footer>click stage to replay · press <kbd>e</kbd> to collapse</footer>
+  </aside>
+
+  <script>
+    const tl = gsap.timeline({ paused: true, defaults: { ease: 'power2.out' } });
+
+    function typewriter(elId, text, startTime, duration) {
+      const el = document.getElementById(elId);
+      tl.call(() => { el.textContent = ''; }, [], startTime);
+      const chars = text.split('');
+      const step = duration / Math.max(chars.length, 1);
+      chars.forEach((c, i) => {
+        tl.call(() => { el.textContent += c; }, [], startTime + (i + 1) * step);
+      });
+    }
+    function setText(id, text, t) { tl.call(() => { document.getElementById(id).textContent = text; }, [], t); }
+
+    /* initial state */
+    tl.set(['#L-noctx', '#L-reply', '#L-echo'], { opacity: 0 }, 0);
+
+    /* ═══════════════ SCENE 1 — DAY 1 CAPTURE (0 – 6.8s) ═══════════════ */
+
+    /* ── LEFT: user session ── */
+    typewriter('L-cmd', 'claude', 0.15, 0.3);
+    tl.call(() => { document.getElementById('L-int').textContent = 'INT'; }, [], 0.5);
+    tl.fromTo('#L-cc', { y: 6, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: 'power3.out' }, 0.65);
+    tl.fromTo('#L-input',  { opacity: 0 }, { opacity: 1, duration: 0.25 }, 1.25);
+    tl.fromTo('#L-status', { opacity: 0 }, { opacity: 1, duration: 0.25 }, 1.35);
+
+    typewriter('L-typed', 'agregá tests para memdoctor signals', 1.8, 1.2);
+
+    // submit: move typed → echo, clear input
+    tl.call(() => {
+      const t = document.getElementById('L-typed');
+      document.getElementById('L-echo-text').textContent = t.textContent;
+      t.textContent = '';
+    }, [], 3.1);
+    tl.fromTo('#L-echo', { opacity: 0, y: 4 }, { opacity: 1, y: 0, duration: 0.25, ease: 'power2.out' }, 3.1);
+
+    // work rows cascade (right above input)
+    tl.fromTo('#L-work', { opacity: 0 }, { opacity: 1, duration: 0.2 }, 3.45);
+    tl.fromTo('#L-work .row:nth-child(1)', { x: -6, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'power2.out' }, 3.55);
+    tl.fromTo('#L-work .row:nth-child(2)', { x: -6, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'expo.out' }, 4.0);
+    tl.fromTo('#L-work .row:nth-child(3)', { x: -6, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'power3.out' }, 4.5);
+
+    tl.to('#L-fill', { width: '100%', duration: 1.1, ease: 'power1.inOut' }, 3.7);
+    setText('L-pct', '100%', 4.8);
+
+    /* ── RIGHT: engram memory capture (mirrors LEFT's work) ── */
+    // mem view fades in first
+    tl.fromTo('#R-mem', { opacity: 0 }, { opacity: 1, duration: 0.4 }, 0.6);
+
+    // memory entries cascade as the user works
+    tl.fromTo('#R-e1', { x: 14, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'expo.out' }, 2.2);
+    tl.call(() => { document.getElementById('R-count').textContent = '193'; }, [], 2.45);
+
+    tl.fromTo('#R-e2', { x: 14, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'power3.out' }, 3.5);
+    tl.call(() => { document.getElementById('R-count').textContent = '194'; }, [], 3.75);
+
+    tl.fromTo('#R-e3', { x: 14, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'expo.out' }, 4.0);
+    tl.call(() => { document.getElementById('R-count').textContent = '195'; }, [], 4.25);
+
+    tl.fromTo('#R-e4', { x: 14, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'power3.out' }, 4.5);
+    tl.call(() => { document.getElementById('R-count').textContent = '196'; }, [], 4.75);
+
+    // executive cache card fades in with its lines
+    tl.fromTo('#R-exec', { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, 5.2);
+    tl.fromTo('#R-exec-l1', { opacity: 0 }, { opacity: 1, duration: 0.3 }, 5.5);
+    tl.fromTo('#R-exec-l2', { opacity: 0 }, { opacity: 1, duration: 0.3 }, 5.75);
+    tl.fromTo('#R-exec-l3', { opacity: 0 }, { opacity: 1, duration: 0.3 }, 6.0);
+
+    // caption Day 1
+    tl.fromTo('#cap-d1', { y: 8, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: 'power3.out' }, 4.8);
+    tl.to('#cap-d1', { opacity: 0, duration: 0.3 }, 6.5);
+
+    /* ═══════════════ SCENE 2 — NEXT DAY OVERLAY (6.8 – 8.0s) ═══════════════ */
+    tl.fromTo('#gap', { opacity: 0 }, { opacity: 1, duration: 0.4, ease: 'power2.inOut' }, 6.8);
+
+    // during overlay: swap states on both panels
+    tl.call(() => {
+      // LEFT → day 2 without engram
+      const pL = document.getElementById('panel-L');
+      pL.classList.remove('panel-d1');
+      pL.classList.add('panel-bad');
+      document.getElementById('L-lbl').textContent = 'day 2 · without engram';
+      document.getElementById('L-pill').textContent = 'Tue';
+      document.getElementById('L-time').textContent = '10:22:08';
+      document.getElementById('L-dirty').textContent = '?2';
+      document.getElementById('L-cmd').textContent = '';
+      document.getElementById('L-typed').textContent = '';
+      document.getElementById('L-int').textContent = '';
+      document.getElementById('L-fill').style.width = '0%';
+      document.getElementById('L-pct').textContent = '0%';
+      document.getElementById('L-reply-text').textContent = '';
+
+      // RIGHT → day 2 with engram (morph memory view → terminal)
+      const pR = document.getElementById('panel-R');
+      pR.classList.remove('panel-mem');
+      pR.classList.add('panel-ok');
+      document.getElementById('R-lbl').textContent = 'day 2 · with engram';
+      document.getElementById('R-pill').textContent = 'Tue';
+      document.getElementById('R-time').textContent = '10:22:41';
+
+      document.getElementById('R-mem').style.display = 'none';
+      document.getElementById('R-term').style.display = 'flex';
+    }, [], 7.3);
+
+    // hide Day 1 left bits (echo cleared & hidden)
+    tl.set('#L-work', { opacity: 0 }, 7.3);
+    tl.set(['#L-work .row:nth-child(1)', '#L-work .row:nth-child(2)', '#L-work .row:nth-child(3)'], { opacity: 0 }, 7.3);
+    tl.set(['#L-cc', '#L-input', '#L-status', '#L-echo'], { opacity: 0 }, 7.3);
+    tl.call(() => { document.getElementById('L-echo-text').textContent = ''; }, [], 7.3);
+
+    // hide Day 2 right bits initially
+    tl.set(['#R-stats', '#R-b1', '#R-b2', '#R-b3', '#R-work', '#R-cc', '#R-input', '#R-status', '#R-echo'], { opacity: 0 }, 7.3);
+    tl.set(['#R-work .row:nth-child(1)', '#R-work .row:nth-child(2)', '#R-work .row:nth-child(3)'], { opacity: 0 }, 7.3);
+
+    // gap fades out
+    tl.to('#gap', { opacity: 0, duration: 0.4, ease: 'power2.in' }, 7.8);
+
+    // vs divider appears
+    tl.fromTo('#vs', { opacity: 0 }, { opacity: 1, duration: 0.4 }, 8.0);
+
+    /* ═══════════════ SCENE 3 — DAY 2 PARALLEL (8.3 – 17.5s) ═══════════════ */
+
+    /* ── LEFT (without engram, fails) ── */
+    typewriter('L-cmd', 'claude', 8.6, 0.28);
+    tl.call(() => { document.getElementById('L-int').textContent = 'INT'; }, [], 8.9);
+
+    tl.fromTo('#L-cc', { y: 6, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 8.8);
+    tl.fromTo('#L-noctx', { opacity: 0 }, { opacity: 1, duration: 0.3 }, 9.2);
+    tl.fromTo('#L-input',  { opacity: 0 }, { opacity: 1, duration: 0.25 }, 9.35);
+    tl.fromTo('#L-status', { opacity: 0 }, { opacity: 1, duration: 0.25 }, 9.45);
+
+    typewriter('L-typed', 'where were we?', 9.4, 0.65);
+
+    // submit: typed → echo
+    tl.call(() => {
+      const t = document.getElementById('L-typed');
+      document.getElementById('L-echo-text').textContent = t.textContent;
+      t.textContent = '';
+    }, [], 10.15);
+    tl.fromTo('#L-echo', { opacity: 0, y: 4 }, { opacity: 1, y: 0, duration: 0.25, ease: 'power2.out' }, 10.15);
+
+    tl.fromTo('#L-reply', { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.35, ease: 'power2.out' }, 10.6);
+    typewriter('L-reply-text', "I don't have context from previous sessions.", 10.7, 0.85);
+
+    tl.to('#L-fill', { width: '8%', duration: 0.7 }, 11.7);
+    setText('L-pct', '8%', 12.1);
+
+    /* ── RIGHT (with engram, loads the memories we just saw captured) ── */
+    typewriter('R-cmd', 'claude', 8.6, 0.28);
+    tl.call(() => { document.getElementById('R-int').textContent = 'INT'; }, [], 8.9);
+
+    tl.fromTo('#R-cc', { y: 6, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: 'power3.out' }, 8.9);
+
+    // SessionStart stats (payoff — uses the memories we watched get saved)
+    tl.fromTo('#R-stats', { opacity: 0 }, { opacity: 1, duration: 0.35 }, 9.6);
+
+    // the SAME 3 bullets we saw being written in Day 1's executive cache
+    tl.fromTo('#R-b1', { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'power3.out' }, 10.0);
+    tl.fromTo('#R-b2', { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'power2.out' }, 10.3);
+    tl.fromTo('#R-b3', { x: -10, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'expo.out' }, 10.6);
+
+    // pulse on "next" — the payoff
+    tl.fromTo('#R-b3', { filter: 'brightness(1)' }, { filter: 'brightness(1.4)', duration: 0.4, yoyo: true, repeat: 1 }, 11.05);
+
+    tl.fromTo('#R-input',  { opacity: 0 }, { opacity: 1, duration: 0.25 }, 10.9);
+    tl.fromTo('#R-status', { opacity: 0 }, { opacity: 1, duration: 0.25 }, 11.0);
+
+    // user continues Day 1's next: directly
+    typewriter('R-typed', 'triage eval/ and wire up the hero demo', 11.8, 1.3);
+
+    // submit: typed → echo
+    tl.call(() => {
+      const t = document.getElementById('R-typed');
+      document.getElementById('R-echo-text').textContent = t.textContent;
+      t.textContent = '';
+    }, [], 13.2);
+    tl.fromTo('#R-echo', { opacity: 0, y: 4 }, { opacity: 1, y: 0, duration: 0.25, ease: 'power2.out' }, 13.2);
+
+    // caption with/without
+    tl.fromTo('#cap-d2', { y: 8, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, 12.2);
+    tl.to('#cap-d2', { opacity: 0, duration: 0.3 }, 14.5);
+
+    // work rows cascade (below echo, pinned right above input)
+    tl.fromTo('#R-work', { opacity: 0 }, { opacity: 1, duration: 0.2 }, 13.55);
+    tl.fromTo('#R-work .row:nth-child(1)', { x: -6, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'power2.out' }, 13.65);
+    tl.fromTo('#R-work .row:nth-child(2)', { x: -6, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'expo.out' }, 14.4);
+    tl.fromTo('#R-work .row:nth-child(3)', { x: -6, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: 'power3.out' }, 15.2);
+
+    tl.to('#R-fill', { width: '78%', duration: 2.0, ease: 'power1.inOut' }, 13.7);
+    setText('R-pct', '78%', 15.6);
+
+    /* ═══════════════ SCENE 4 — CLOSE (18.5 – 23s) ═══════════════ */
+    tl.to('#mask', { opacity: 1, duration: 0.45, ease: 'power2.in' }, 18.3);
+    tl.fromTo('#close', { opacity: 0, scale: 0.98 }, { opacity: 1, scale: 1, duration: 0.55, ease: 'expo.out' }, 18.55);
+
+    typewriter('install-cmd', '/plugin install claude-engram', 19.6, 1.0);
+
+    tl.to({}, { duration: 0.01 }, 22.98);
+
+    window.__timelines = window.__timelines || {};
+    window.__timelines['engram-hero'] = tl;
+
+    /* preview helpers */
+    function fitStage() {
+      const stage = document.getElementById('stage');
+      const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      stage.style.transform = `scale(${scale})`;
+    }
+    const isPreview = window.innerWidth !== 1920 || window.innerHeight !== 1080;
+    if (isPreview) {
+      document.body.classList.add('preview');
+      fitStage();
+      window.addEventListener('resize', fitStage);
+      window.addEventListener('load', () => tl.restart());
+      document.addEventListener('click', (e) => {
+        if (e.target.closest('#explainer')) return;
+        tl.restart();
+      });
+
+      const expl = document.getElementById('explainer');
+      const steps = [...expl.querySelectorAll('li')];
+      document.getElementById('expl-toggle').addEventListener('click', (e) => {
+        e.stopPropagation();
+        expl.classList.toggle('collapsed');
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'e' || e.key === 'E') expl.classList.toggle('collapsed');
+      });
+      gsap.ticker.add(() => {
+        const t = tl.time();
+        let active = -1;
+        for (let i = 0; i < steps.length; i++) {
+          if (parseFloat(steps[i].dataset.t) <= t) active = i;
+        }
+        steps.forEach((el, i) => el.classList.toggle('active', i === active));
+      });
+    }
+  </script>
+</body>
+</html>

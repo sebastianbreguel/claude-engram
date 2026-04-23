@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>engram — scale beat (project → memory)</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --card: #13171c;
+      --border: #262b33;
+      --fg: #d7dbe0;
+      --dim: #6b7280;
+      --muted: #9aa3ad;
+      --accent: #7ee787;
+      --claude: #ff9161;
+      --blue: #79c0ff;
+      --yellow: #e3b341;
+      --magenta: #c57bdb;
+      --divider: #1f242c;
+      --user-tag: #79c0ff;
+      --feedback-tag: #e3b341;
+      --project-tag: #7ee787;
+      --reference-tag: #c57bdb;
+    }
+    html, body {
+      margin: 0; padding: 0; background: var(--bg);
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+      color: var(--fg); overflow: hidden;
+    }
+    .stage { position: relative; overflow: hidden; transform-origin: top left; }
+
+    /* INTRO grid — 3 descriptor cards (phase 1) */
+    .intro-grid {
+      position: absolute; inset: 0;
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 36px; padding: 240px 80px;
+      align-items: center; pointer-events: none;
+    }
+    .intro-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 32px 28px;
+      opacity: 0;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+      min-height: 260px;
+      display: flex; flex-direction: column;
+    }
+    .intro-card .eyebrow {
+      color: var(--dim); font-size: 13px; letter-spacing: 0.12em;
+      text-transform: uppercase; margin-bottom: 14px;
+    }
+    .intro-card .name {
+      color: var(--blue); font-size: 28px; font-weight: 600;
+      margin-bottom: 6px; letter-spacing: -0.01em;
+    }
+    .intro-card .tag {
+      color: var(--accent); font-size: 13px; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 16px;
+    }
+    .intro-card .desc {
+      color: var(--fg); font-size: 17px; line-height: 1.55;
+      margin-bottom: auto;
+    }
+    .intro-card .meta {
+      color: var(--muted); font-size: 13px;
+      padding-top: 14px; border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between;
+    }
+    .intro-card .meta .model { color: var(--claude); }
+
+    /* VROWS — 3 vertical columns (phase 2) */
+    .vrows {
+      position: absolute; inset: 0;
+      padding: 48px 60px;
+      display: flex; flex-direction: row;
+      gap: 32px;
+      box-sizing: border-box;
+      align-items: flex-start;
+    }
+    .vrow {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      gap: 0;
+      opacity: 0;
+      justify-content: flex-start;
+    }
+    /* project block — header on top, terminal output below */
+    .proj-card {
+      background: transparent;
+      padding: 0 6px;
+      display: flex; flex-direction: column;
+      box-sizing: border-box;
+      font-family: 'JetBrains Mono','SF Mono',Menlo,monospace;
+      line-height: 1.5;
+      gap: 8px;
+    }
+    /* TOP: project identifier */
+    .proj-header {
+      display: flex; flex-direction: column; gap: 1px;
+      padding: 8px 14px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .proj-header .pname {
+      color: var(--blue); font-size: 18px; font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .proj-header .ptag {
+      color: var(--muted); font-size: 12px;
+    }
+    .proj-header .ptag .dot { color: var(--divider); margin: 0 6px; }
+    .proj-header .ptag .path { color: var(--dim); }
+
+    /* BOTTOM: Claude Code terminal output */
+    .proj-term {
+      display: flex; flex-direction: column;
+      padding: 4px 2px;
+    }
+    .proj-term .cc {
+      display: grid; grid-template-columns: auto 1fr; gap: 10px;
+      margin-bottom: 6px;
+    }
+    .proj-term .cc .logo {
+      color: var(--claude);
+      font-size: 11px; line-height: 1.0;
+      white-space: pre; letter-spacing: -0.02em;
+      margin-top: 1px;
+    }
+    .proj-term .cc .info { display: flex; flex-direction: column; gap: 1px; }
+    .proj-term .cc .title { color: var(--fg); font-size: 13px; font-weight: 600; }
+    .proj-term .cc .model { color: var(--muted); font-size: 12px; }
+    .proj-term .cc .cwd   { color: var(--blue);  font-size: 12px; }
+    .proj-term .stats {
+      color: var(--muted); font-size: 12px; margin-bottom: 3px;
+    }
+    .proj-term .stats .tree { color: var(--divider); margin-right: 8px; }
+    .proj-term .stats .kw   { color: var(--accent); font-weight: 600; }
+    .proj-term .stats .proj { color: var(--blue); }
+    .proj-term .stats .num  { color: var(--fg); font-weight: 600; }
+    .proj-term .stats .dot  { color: var(--divider); margin: 0 6px; }
+    .proj-term .bullet {
+      display: flex; padding-left: 22px;
+      color: var(--fg); font-size: 12px; margin-bottom: 1px;
+    }
+    .proj-term .bullet .dash  { color: var(--dim); margin-right: 8px; }
+    .proj-term .bullet .label { color: var(--muted); margin-right: 6px;
+      min-width: 62px; display: inline-block; }
+
+    .arrow {
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent); font-size: 28px; opacity: 0;
+      position: relative;
+      padding: 6px 0;
+    }
+    .arrow svg { width: 20px; height: 32px; }
+    .arrow svg path { stroke: var(--accent); stroke-width: 2; fill: none;
+      stroke-linecap: round; stroke-linejoin: round;
+      stroke-dasharray: 120; stroke-dashoffset: 120; }
+
+    .mem-stack {
+      background: rgba(19,23,28,0.6);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 6px;
+      box-sizing: border-box;
+    }
+    .mem {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 16px; opacity: 0;
+    }
+    .mem .mtag {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      font-weight: 600; letter-spacing: 0.04em;
+      flex: 0 0 auto; min-width: 78px; text-align: center;
+    }
+    .mem .mtag.user      { background: rgba(121,192,255,.15); color: var(--user-tag); }
+    .mem .mtag.feedback  { background: rgba(227,179,65,.15);  color: var(--feedback-tag); }
+    .mem .mtag.project   { background: rgba(126,231,135,.15); color: var(--project-tag); }
+    .mem .mtag.reference { background: rgba(197,123,219,.15); color: var(--reference-tag); }
+    .mem .mtxt { color: var(--fg); }
+
+    .caption {
+      position: absolute; left: 0; right: 0; bottom: 40px;
+      text-align: center; font-size: 24px;
+      color: var(--muted); letter-spacing: 0.06em; opacity: 0;
+    }
+    .caption .hi { color: var(--accent); }
+
+    /* preview-only explainer (hidden from HyperFrames render) */
+    #explainer {
+      display: none; position: fixed; right: 14px; top: 14px;
+      width: 340px; max-height: calc(100vh - 28px);
+      background: rgba(19,23,28,0.96);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--fg);
+      font-family: 'JetBrains Mono','SF Mono',Menlo,monospace;
+      font-size: 12px; line-height: 1.5;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+      z-index: 50; overflow: hidden;
+      backdrop-filter: blur(4px);
+    }
+    body.preview #explainer { display: block; }
+    #explainer header { display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 12px; border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.25); }
+    #explainer header strong { color: var(--accent); font-weight: 600; letter-spacing: 0.04em; font-size: 13px; }
+    #explainer header .sub { color: var(--dim); font-size: 11px; margin-left: 8px; }
+    #explainer header button { background: transparent; border: 0; color: var(--muted);
+      cursor: pointer; font-size: 13px; font-family: inherit; padding: 0 4px; }
+    #explainer ol { margin: 0; padding: 10px 12px 10px 30px; max-height: 58vh; overflow-y: auto; }
+    #explainer li { margin: 0 0 8px 0; color: var(--muted); transition: color 0.2s ease; }
+    #explainer li .t { color: var(--dim); font-weight: 600; margin-right: 6px;
+      display: inline-block; min-width: 42px; }
+    #explainer li.active { color: var(--fg); }
+    #explainer li.active .t { color: var(--accent); }
+    #explainer li .hi { color: var(--accent); }
+    #explainer li .proj { color: var(--blue); }
+    #explainer li code { background: rgba(255,255,255,0.05); padding: 1px 5px;
+      border-radius: 3px; font-family: inherit; color: var(--fg); font-size: 11px; }
+    #explainer footer { padding: 8px 12px; border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--dim); }
+    #explainer footer kbd { background: rgba(255,255,255,0.06); padding: 1px 5px;
+      border-radius: 3px; border: 1px solid var(--border); font-family: inherit; }
+    #explainer.collapsed ol, #explainer.collapsed footer { display: none; }
+  </style>
+</head>
+<body>
+  <div id="stage" class="stage"
+    data-composition-id="engram-scale-beat"
+    data-width="1920" data-height="800" data-duration="10" data-fps="30"
+    style="width:1920px;height:800px;">
+
+    <!-- PHASE 1: INTRO descriptor cards -->
+    <div class="intro-grid">
+      <div id="i1" class="intro-card clip" data-start="0" data-duration="1.8" data-track-index="10">
+        <div class="eyebrow">project 1 of 3</div>
+        <div class="name">claude-engram</div>
+        <div class="tag">Claude Code plugin</div>
+        <div class="desc">Persistent memory with per-project handoff and pattern detection. Keeps context warm across sessions.</div>
+        <div class="meta"><span>~/personal/claude-engram</span><span class="model">Opus 4.7</span></div>
+      </div>
+      <div id="i2" class="intro-card clip" data-start="0" data-duration="1.8" data-track-index="11">
+        <div class="eyebrow">project 2 of 3</div>
+        <div class="name">vambe-analytics</div>
+        <div class="tag">FastAPI + LLM pipeline</div>
+        <div class="desc">Extracts insights from chat data: classification, embeddings, HDBSCAN clustering, narrative generation.</div>
+        <div class="meta"><span>~/work/vambe-analytics</span><span class="model">Sonnet 4.6</span></div>
+      </div>
+      <div id="i3" class="intro-card clip" data-start="0" data-duration="1.8" data-track-index="12">
+        <div class="eyebrow">project 3 of 3</div>
+        <div class="name">rtk-cli</div>
+        <div class="tag">Rust token killer</div>
+        <div class="desc">Token-optimized CLI proxy — 60–90% savings on dev operations via transparent command rewriting.</div>
+        <div class="meta"><span>~/personal/rtk-cli</span><span class="model">Haiku 4.5</span></div>
+      </div>
+    </div>
+
+    <!-- PHASE 2: VROWS — project → memory, stacked vertically -->
+    <div class="vrows">
+
+      <!-- ROW 1: claude-engram -->
+      <div id="r1" class="vrow clip" data-start="1.8" data-duration="8.2" data-track-index="0">
+        <div class="proj-card">
+          <div class="proj-header">
+            <div class="pname">claude-engram</div>
+            <div class="ptag">Claude Code plugin<span class="dot">·</span><span class="path">~/personal/claude-engram</span></div>
+          </div>
+          <div class="proj-term">
+            <div class="cc">
+              <div class="logo"> ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝</div>
+              <div class="info">
+                <div class="title">Claude Code v2.1.112</div>
+                <div class="model">Opus 4.7 · xhigh</div>
+                <div class="cwd">~/personal/claude-engram</div>
+              </div>
+            </div>
+            <div class="stats">
+              <span class="tree">⎿</span><span class="kw">engram</span><span class="dot">·</span><span class="proj">claude-engram</span><span class="dot">·</span><span class="num">49</span> sess<span class="dot">·</span>2h<span class="dot">·</span><span class="num">196</span> mem
+            </div>
+            <div class="bullet"><span class="dash">-</span><span class="label">status:</span><span>Tier 1 complete, 106 tests</span></div>
+            <div class="bullet"><span class="dash">-</span><span class="label">last:</span><span>8 SessionStart latency wins</span></div>
+            <div class="bullet"><span class="dash">-</span><span class="label">next:</span><span>triage eval/ → Tier 2</span></div>
+          </div>
+        </div>
+        <div class="arrow" id="a1">
+          <svg viewBox="0 0 24 48"><path d="M 12 2 L 12 38 M 4 30 L 12 42 L 20 30"/></svg>
+        </div>
+        <div class="mem-stack">
+          <div class="mem r1-m1"><span class="mtag user">USER</span><span class="mtxt">data scientist at Vambe · Python, FastAPI, async-first</span></div>
+          <div class="mem r1-m2"><span class="mtag feedback">FEEDBACK</span><span class="mtxt">use Sonnet for subagents, never Haiku</span></div>
+          <div class="mem r1-m3"><span class="mtag project">PROJECT</span><span class="mtxt">Tier 1 complete · 106 tests · SessionStart latency wins shipped</span></div>
+          <div class="mem r1-m4"><span class="mtag feedback">FEEDBACK</span><span class="mtxt">skip version bumps until launch</span></div>
+        </div>
+      </div>
+
+      <!-- ROW 2: vambe-analytics -->
+      <div id="r2" class="vrow clip" data-start="1.8" data-duration="8.2" data-track-index="1">
+        <div class="proj-card">
+          <div class="proj-header">
+            <div class="pname">vambe-analytics</div>
+            <div class="ptag">FastAPI + LLM pipeline<span class="dot">·</span><span class="path">~/work/vambe-analytics</span></div>
+          </div>
+          <div class="proj-term">
+            <div class="cc">
+              <div class="logo"> ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝</div>
+              <div class="info">
+                <div class="title">Claude Code v2.1.112</div>
+                <div class="model">Sonnet 4.6 · med</div>
+                <div class="cwd">~/work/vambe-analytics</div>
+              </div>
+            </div>
+            <div class="stats">
+              <span class="tree">⎿</span><span class="kw">engram</span><span class="dot">·</span><span class="proj">vambe-analytics</span><span class="dot">·</span><span class="num">127</span> sess<span class="dot">·</span>1d<span class="dot">·</span><span class="num">84</span> mem
+            </div>
+            <div class="bullet"><span class="dash">-</span><span class="label">status:</span><span>HDBSCAN tuned, 0.82 silhouette</span></div>
+            <div class="bullet"><span class="dash">-</span><span class="label">last:</span><span>narrative stage shipped</span></div>
+            <div class="bullet"><span class="dash">-</span><span class="label">next:</span><span>weekly recap endpoint</span></div>
+          </div>
+        </div>
+        <div class="arrow" id="a2">
+          <svg viewBox="0 0 24 48"><path d="M 12 2 L 12 38 M 4 30 L 12 42 L 20 30"/></svg>
+        </div>
+        <div class="mem-stack">
+          <div class="mem r2-m1"><span class="mtag user">USER</span><span class="mtxt">prefers uv over pip · ruff + ty for CI</span></div>
+          <div class="mem r2-m2"><span class="mtag feedback">FEEDBACK</span><span class="mtxt">classes &gt; loose functions for stateful logic</span></div>
+          <div class="mem r2-m3"><span class="mtag project">PROJECT</span><span class="mtxt">HDBSCAN tuned · 0.82 silhouette · narrative stage shipped</span></div>
+          <div class="mem r2-m4"><span class="mtag reference">REFERENCE</span><span class="mtxt">Linear INGEST · pipeline bug tracker</span></div>
+        </div>
+      </div>
+
+      <!-- ROW 3: rtk-cli -->
+      <div id="r3" class="vrow clip" data-start="1.8" data-duration="8.2" data-track-index="2">
+        <div class="proj-card">
+          <div class="proj-header">
+            <div class="pname">rtk-cli</div>
+            <div class="ptag">Rust token-killer<span class="dot">·</span><span class="path">~/personal/rtk-cli</span></div>
+          </div>
+          <div class="proj-term">
+            <div class="cc">
+              <div class="logo"> ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝</div>
+              <div class="info">
+                <div class="title">Claude Code v2.1.112</div>
+                <div class="model">Haiku 4.5 · low</div>
+                <div class="cwd">~/personal/rtk-cli</div>
+              </div>
+            </div>
+            <div class="stats">
+              <span class="tree">⎿</span><span class="kw">engram</span><span class="dot">·</span><span class="proj">rtk-cli</span><span class="dot">·</span><span class="num">31</span> sess<span class="dot">·</span>5h<span class="dot">·</span><span class="num">42</span> mem
+            </div>
+            <div class="bullet"><span class="dash">-</span><span class="label">status:</span><span>proxy hook stable, 60% savings</span></div>
+            <div class="bullet"><span class="dash">-</span><span class="label">last:</span><span>gain --history flag</span></div>
+            <div class="bullet"><span class="dash">-</span><span class="label">next:</span><span>discover subcommand</span></div>
+          </div>
+        </div>
+        <div class="arrow" id="a3">
+          <svg viewBox="0 0 24 48"><path d="M 12 2 L 12 38 M 4 30 L 12 42 L 20 30"/></svg>
+        </div>
+        <div class="mem-stack">
+          <div class="mem r3-m1"><span class="mtag user">USER</span><span class="mtxt">Spanish prompts OK · prefers short replies</span></div>
+          <div class="mem r3-m2"><span class="mtag feedback">FEEDBACK</span><span class="mtxt">watch for name collision with reachingforthejack/rtk</span></div>
+          <div class="mem r3-m3"><span class="mtag project">PROJECT</span><span class="mtxt">proxy hook stable · 60–90% token savings</span></div>
+          <div class="mem r3-m4"><span class="mtag reference">REFERENCE</span><span class="mtxt">rtk gain · token savings analytics CLI</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div id="caption" class="caption clip" data-start="7.0" data-duration="3.0" data-track-index="3">
+      one plugin · <span class="hi">one memory per project</span>
+    </div>
+  </div>
+
+  <aside id="explainer" aria-hidden="true">
+    <header>
+      <span><strong>how it works</strong><span class="sub">scale · 10s</span></span>
+      <button id="expl-toggle" title="toggle (e)">▾</button>
+    </header>
+    <ol>
+      <li data-t="0.05"><span class="t">0.05s</span>Intro: <span class="proj">claude-engram</span> — Claude Code memory plugin</li>
+      <li data-t="0.17"><span class="t">0.17s</span>Intro: <span class="proj">vambe-analytics</span> — FastAPI + LLM pipeline over chat data</li>
+      <li data-t="0.29"><span class="t">0.29s</span>Intro: <span class="proj">rtk-cli</span> — Rust token-killer CLI proxy</li>
+      <li data-t="1.45"><span class="t">1.45s</span>Descriptor cards fade out</li>
+      <li data-t="1.9"><span class="t">1.9s</span>Column 1 slides in — <span class="proj">claude-engram</span> card on top</li>
+      <li data-t="2.35"><span class="t">2.35s</span>Arrow draws — project <span class="hi">↓</span> its memories</li>
+      <li data-t="2.55"><span class="t">2.55s</span>claude-engram memories cascade (USER · FEEDBACK · PROJECT · FEEDBACK)</li>
+      <li data-t="3.5"><span class="t">3.5s</span>Column 2 slides in — <span class="proj">vambe-analytics</span> + its memories</li>
+      <li data-t="4.8"><span class="t">4.8s</span>Column 3 slides in — <span class="proj">rtk-cli</span> + its memories</li>
+      <li data-t="6.2"><span class="t">6.2s</span>Full picture holds: 3 projects, each with its own memory slice</li>
+      <li data-t="7.0"><span class="t">7.0s</span>Caption: one plugin · <span class="hi">one memory per project</span></li>
+    </ol>
+    <footer>memory.db is global (~/.claude/memory.db) but executives + patterns are scoped per cwd slug<br/>click stage to replay · <kbd>e</kbd> to collapse</footer>
+  </aside>
+
+  <script>
+    const tl = gsap.timeline({ paused: true, defaults: { ease: 'power3.out' } });
+
+    /* ───── PHASE 1 (0 – 1.8s): intro descriptor cards ───── */
+    ['#i1', '#i2', '#i3'].forEach((sel, i) => {
+      tl.fromTo(sel,
+        { y: 20, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.4 },
+        0.05 + i * 0.12
+      );
+    });
+    tl.to(['#i1', '#i2', '#i3'],
+      { y: -16, opacity: 0, duration: 0.35, stagger: 0.06 },
+      1.45
+    );
+
+    /* ───── PHASE 2 (1.8 – 7.0s): vertical rows cascade ───── */
+    const rows = [
+      { row: '#r1', arrow: '#a1', mems: ['.r1-m1','.r1-m2','.r1-m3','.r1-m4'], start: 1.9 },
+      { row: '#r2', arrow: '#a2', mems: ['.r2-m1','.r2-m2','.r2-m3','.r2-m4'], start: 3.5 },
+      { row: '#r3', arrow: '#a3', mems: ['.r3-m1','.r3-m2','.r3-m3','.r3-m4'], start: 4.8 },
+    ];
+    rows.forEach(({ row, arrow, mems, start }) => {
+      // column fade-in + slight slide from below
+      tl.fromTo(row,
+        { y: 24, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.55 },
+        start
+      );
+      // arrow: fade + stroke draw
+      tl.fromTo(arrow,
+        { opacity: 0 },
+        { opacity: 1, duration: 0.25 },
+        start + 0.45
+      );
+      tl.to(`${arrow} path`,
+        { strokeDashoffset: 0, duration: 0.5, ease: 'power2.inOut' },
+        start + 0.45
+      );
+      // memories cascade from below
+      mems.forEach((m, i) => {
+        tl.fromTo(m,
+          { y: 12, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.3 },
+          start + 0.65 + i * 0.14
+        );
+      });
+    });
+
+    /* ───── PHASE 3 (7.0 – 10.0s): caption holds ───── */
+    tl.fromTo('#caption',
+      { y: 12, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.6 },
+      7.0
+    );
+    tl.to({}, { duration: 0.01 }, 9.99);
+
+    window.__timelines = window.__timelines || {};
+    window.__timelines['engram-scale-beat'] = tl;
+
+    /* ───── Preview helpers (not used by HyperFrames render) ───── */
+    function fitStage() {
+      const stage = document.getElementById('stage');
+      const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      stage.style.transform = `scale(${scale})`;
+    }
+    const isPreview = window.innerWidth !== 1920 || window.innerHeight !== 1080;
+    if (isPreview) {
+      document.body.classList.add('preview');
+      fitStage();
+      window.addEventListener('resize', fitStage);
+      window.addEventListener('load', () => tl.restart());
+      document.addEventListener('click', (e) => {
+        if (e.target.closest('#explainer')) return;
+        tl.restart();
+      });
+
+      const expl = document.getElementById('explainer');
+      const steps = [...expl.querySelectorAll('li')];
+      document.getElementById('expl-toggle').addEventListener('click', (e) => {
+        e.stopPropagation();
+        expl.classList.toggle('collapsed');
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'e' || e.key === 'E') expl.classList.toggle('collapsed');
+      });
+      gsap.ticker.add(() => {
+        const t = tl.time();
+        let active = -1;
+        for (let i = 0; i < steps.length; i++) {
+          if (parseFloat(steps[i].dataset.t) <= t) active = i;
+        }
+        steps.forEach((el, i) => el.classList.toggle('active', i === active));
+      });
+    }
+  </script>
+</body>
+</html>
