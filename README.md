@@ -4,8 +4,6 @@
 
 claude-engram fixes that. **~350 ambient tokens. No Docker, no API keys, no MCP.**
 
-![engram demo](demo/engram-hero.gif)
-
 ## What you see
 
 When you open Claude Code, claude-engram injects a 3-bullet executive summary from your last session:
@@ -20,8 +18,6 @@ friction: correction-heavy(4x), error-loop(2x) (run: engram doctor)
 Three bullets, zero latency. The merge (recap + memory + patterns) happens in the background *between* sessions, so opening is instant. The optional `friction:` line surfaces when `memdoctor` detects active signals for the current project.
 
 ## How it works
-
-![session flow](demo/session-flow.gif)
 
 claude-engram has two jobs: **remember** and **inject**.
 
