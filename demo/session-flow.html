@@ -147,7 +147,7 @@
       z-index: 50; overflow: hidden;
       backdrop-filter: blur(4px);
     }
-    body.preview #explainer { display: block; }
+    body.preview #explainer { display: none; }
     #explainer header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 10px 14px; border-bottom: 1px solid var(--divider);
@@ -264,25 +264,6 @@
     </div>
   </div>
 
-  <aside id="explainer" aria-hidden="true">
-    <header>
-      <span><strong>how it works</strong><span class="sub">session flow · 11s</span></span>
-      <button id="expl-toggle" title="toggle (e)">▾</button>
-    </header>
-    <ol>
-      <li data-t="0.0"><span class="t">0.0s</span>Session 1 — user types <code>claude</code> in the shell</li>
-      <li data-t="0.65"><span class="t">0.7s</span>Claude Code boots (Opus 4.7, xhigh)</li>
-      <li data-t="1.15"><span class="t">1.1s</span><span class="tag">SessionStart:startup</span> fires the engram hook — banner renders</li>
-      <li data-t="1.45"><span class="t">1.4s</span>3-bullet executive: <span class="hi">status · last change · next</span> (48 sessions, 195 memories)</li>
-      <li data-t="2.55"><span class="t">2.5s</span>User types a prompt that follows the <em>next</em> bullet</li>
-      <li data-t="4.0"><span class="t">4.0s</span>Session ends — <span class="hi">2 hours pass</span></li>
-      <li data-t="5.7"><span class="t">5.7s</span>Session 2 — <code>claude</code> again on a fresh shell</li>
-      <li data-t="6.6"><span class="t">6.6s</span>Banner now shows <span class="hi">49 sessions · 196 memories</span> (+1 each)</li>
-      <li data-t="7.2"><span class="t">7.2s</span><em>last change</em> bullet is highlighted — it's what Session 1 did</li>
-      <li data-t="9.0"><span class="t">9.0s</span>Caption: Claude picks up where you left off, zero effort</li>
-    </ol>
-    <footer>click stage to replay · press <kbd>e</kbd> to collapse</footer>
-  </aside>
 
   <script>
     const tl = gsap.timeline({ paused: true, defaults: { ease: 'power2.out' } });
