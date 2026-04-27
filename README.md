@@ -1,5 +1,7 @@
 # Claude-engram
 
+[![tests](https://img.shields.io/github/actions/workflow/status/sebastianbreguel/claude-engram/test.yml?branch=main&label=tests&style=flat)](https://github.com/sebastianbreguel/claude-engram/actions/workflows/test.yml) [![license](https://img.shields.io/github/license/sebastianbreguel/claude-engram?style=flat)](LICENSE)
+
 **Claude forgets everything between sessions.** Your preferences, your project state, where you left off — gone the moment you close the terminal.
 
 claude-engram fixes that. **~350 ambient tokens. No Docker, no API keys, no MCP.**
