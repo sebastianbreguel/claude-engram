@@ -691,23 +691,28 @@ def _on_executive(args: argparse.Namespace) -> int:
     cache = _executive_cache_path(cwd)
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
+        # Write tmp first so a failed `tmp.write_text` never destroys the current
+        # cache. Tmp filename includes the PID so concurrent SessionStart hooks
+        # in different windows on the same project don't race on a shared tmp.
+        # Note: if the final `os.replace(tmp, cache)` below fails after rotation,
+        # the live summary is recoverable via `engram preview --prev`.
+        tmp = cache.parent / f"{cache.name}.{os.getpid()}.tmp"
+        try:
+            tmp.write_text(output + "\n", encoding="utf-8")
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
         # Safety net: rotate existing cache to .prev before overwriting.
-        # Lets `engram preview --prev` recover the last good summary when
-        # Sonnet compresses the next rebuild poorly.
+        # `engram preview --prev` recovers the last good summary when Sonnet
+        # compresses the next rebuild poorly OR when the publish step below fails.
         if cache.exists():
             prev = cache.with_suffix(cache.suffix + ".prev")
             try:
                 os.replace(cache, prev)
             except OSError as e:
                 _log_warning(f"executive: rotate to .prev failed: {e}")
-        # Atomic write: tmp + rename eliminates partial-file window on crash.
-        tmp = cache.with_suffix(cache.suffix + ".tmp")
-        try:
-            tmp.write_text(output + "\n", encoding="utf-8")
-            os.replace(tmp, cache)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
+        # Atomic publish.
+        os.replace(tmp, cache)
     except Exception as e:
         _log_warning(f"executive: cache write failed: {e}")
     return 0
@@ -1028,25 +1033,37 @@ def _on_session_start(_args: argparse.Namespace) -> int:
             except Exception:
                 executive = ""
 
+    # Schema-version refusal raised by MemoryDB._migrate must not crash the
+    # SessionStart hook. Catch + surface in systemMessage so the user sees the
+    # actionable message at the next prompt rather than silently losing the
+    # banner. All other exceptions still propagate (real bugs deserve traces).
+    schema_error: str | None = None
+
     if executive:
         context = executive
     else:
         buf = io.StringIO()
-        memcapture.run(_memcap_ns(inject=True, inject_project=project_key or None), out=buf)
+        try:
+            memcapture.run(_memcap_ns(inject=True, inject_project=project_key or None), out=buf)
+        except RuntimeError as e:
+            schema_error = str(e)
         context = buf.getvalue()
 
     banner = ""
     if os.environ.get("ENGRAM_SHOW_BANNER", "1") == "1":
         buf2 = io.StringIO()
         display_name = Path(cwd).name if cwd else ""
-        memcapture.run(
-            _memcap_ns(
-                banner=True,
-                banner_project=project_key or None,
-                banner_name=display_name or None,
-            ),
-            out=buf2,
-        )
+        try:
+            memcapture.run(
+                _memcap_ns(
+                    banner=True,
+                    banner_project=project_key or None,
+                    banner_name=display_name or None,
+                ),
+                out=buf2,
+            )
+        except RuntimeError as e:
+            schema_error = schema_error or str(e)
         banner = buf2.getvalue().strip()
         if executive:
             header = banner.split("\n", 1)[0] if banner else ""
@@ -1056,6 +1073,9 @@ def _on_session_start(_args: argparse.Namespace) -> int:
             else:
                 exec_text = executive
             banner = f"{header}\n{exec_text}" if header else exec_text
+
+    if schema_error:
+        banner = f"engram: {schema_error}" + (f"\n{banner}" if banner else "")
 
     out: dict = {
         "continue": True,

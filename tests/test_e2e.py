@@ -62,6 +62,30 @@ def test_schema_user_version_is_2(tmp_home):
     assert version == 2, f"expected user_version=2, got {version}"
 
 
+def test_migrate_refuses_future_schema_version(tmp_path):
+    """If user_version on disk exceeds LATEST_SCHEMA_VERSION, _migrate must
+    refuse — silently using a future schema risks data loss after a downgrade.
+
+    Uses tmp_path (not tmp_home) on purpose: the file name is `engram_test.db`,
+    not `memory.db`, so even if memcapture's module-level DB_PATH happens to
+    point inside tmp_path, there is no collision with this fixture file.
+    """
+    import sqlite3
+    import sys
+
+    sys.path.insert(0, str(REPO / "tools"))
+    from memcapture import MemoryDB
+
+    db_path = tmp_path / "engram_test.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(f"PRAGMA user_version = {MemoryDB.LATEST_SCHEMA_VERSION + 1}")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="newer than this engram"):
+        MemoryDB(db_path=db_path)
+
+
 def test_capture_then_stats_reports_activity(tmp_home):
     """After capture, --stats reports non-zero sessions. Contract: the user sees a summary."""
     _memcap(["--transcript", str(FIXTURE)])

@@ -32,7 +32,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TextIO
+from typing import ClassVar, TextIO
 
 DECAY_HALF_LIFE_DAYS = 21.0
 DECAY_FLOOR = 0.1
@@ -83,6 +83,8 @@ def _like_escape(s: str) -> str:
 class MemoryDB:
     """SQLite-backed session memory store with FTS5 search."""
 
+    LATEST_SCHEMA_VERSION: ClassVar[int] = 2
+
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,8 +93,12 @@ class MemoryDB:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.create_function("exp_decay", 2, _exp_decay_sql)
-        self._create_tables()
-        self._migrate()
+        try:
+            self._create_tables()
+            self._migrate()
+        except Exception:
+            self.conn.close()
+            raise
 
     def _create_tables(self) -> None:
         self.conn.executescript("""
@@ -181,11 +187,22 @@ class MemoryDB:
     def _migrate(self) -> None:
         """Run incremental schema migrations gated by PRAGMA user_version.
 
-        Current schema version: 1 (stamp only; all v1 columns are declared in
-        CREATE TABLE statements above). Future ALTERs go inside `if version < N:`
+        Current schema version: 2. Future ALTERs go inside `if version < N:`
         blocks, each ending with `PRAGMA user_version = N` and a commit.
+        Bump LATEST_SCHEMA_VERSION when adding a new block.
+
+        Refuses to run if the on-disk version is newer than this code knows
+        about — that means the user downgraded engram, and silently using a
+        future schema risks data loss or column-not-found errors.
         """
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+
+        if version > self.LATEST_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"memory.db schema version {version} is newer than this engram "
+                f"build supports (max {self.LATEST_SCHEMA_VERSION}). You likely "
+                f"downgraded — reinstall the latest engram or move ~/.claude/memory.db aside."
+            )
 
         if version < 1:
             # v1 sentinel: current schema is the baseline. No data changes.

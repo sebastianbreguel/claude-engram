@@ -351,6 +351,125 @@ def test_executive_cache_rotates_to_prev(tmp_path, monkeypatch):
     assert prev.read_text().strip() == "OLD SUMMARY"
 
 
+def test_executive_cache_survives_tmp_write_failure(tmp_path, monkeypatch):
+    """If tmp.write_text raises, original cache + .prev must remain intact.
+
+    Regression: prior order rotated cache→.prev BEFORE writing tmp, so a write
+    failure left the cache file gone. Order is now write-tmp → rotate → replace.
+    """
+    import importlib.util
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    spec = importlib.util.spec_from_file_location("engram_mod", ENGRAM)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    cwd = str(tmp_path / "proj")
+    (tmp_path / "proj").mkdir()
+    cache = mod._executive_cache_path(cwd)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("OLD SUMMARY\n")
+    prev = cache.with_suffix(cache.suffix + ".prev")
+    prev.write_text("OLDER SUMMARY\n")
+
+    monkeypatch.setattr(mod, "_run_claude", lambda prompt, chunk="", timeout=120: "NEW SUMMARY")
+    monkeypatch.setattr(mod, "_latest_recap", lambda c, max_files=20: "fake recap")
+
+    # Force tmp.write_text to fail by patching Path.write_text on the tmp file path.
+    real_write_text = Path.write_text
+
+    def failing_write_text(self, *args, **kwargs):
+        if ".tmp" in str(self):
+            raise OSError("simulated disk full")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", failing_write_text)
+
+    ns = __import__("argparse").Namespace(cwd=cwd, project_key=cwd.replace("/", "-"))
+    # _on_executive swallows write errors via _log_warning; return is still 0.
+    assert mod._on_executive(ns) == 0
+    # Cache and .prev must be untouched, no per-pid tmp files must linger.
+    assert cache.read_text().strip() == "OLD SUMMARY"
+    assert prev.read_text().strip() == "OLDER SUMMARY"
+    assert not list(cache.parent.glob(f"{cache.name}.*.tmp"))
+
+
+def test_executive_cache_tmp_includes_pid(tmp_path, monkeypatch):
+    """Concurrent SessionStart hooks must not race on a shared tmp file.
+
+    Tmp filename includes os.getpid() so two windows on the same project write
+    to disjoint tmp paths and the final atomic os.replace stays per-process.
+    """
+    import importlib.util
+    import os as _os
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    spec = importlib.util.spec_from_file_location("engram_mod", ENGRAM)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    cwd = str(tmp_path / "proj")
+    (tmp_path / "proj").mkdir()
+    cache = mod._executive_cache_path(cwd)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(mod, "_run_claude", lambda prompt, chunk="", timeout=120: "NEW")
+    monkeypatch.setattr(mod, "_latest_recap", lambda c, max_files=20: "fake recap")
+
+    captured_tmp_paths: list[str] = []
+    real_write_text = Path.write_text
+
+    def capturing_write_text(self, *args, **kwargs):
+        if ".tmp" in str(self):
+            captured_tmp_paths.append(str(self))
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", capturing_write_text)
+
+    ns = __import__("argparse").Namespace(cwd=cwd, project_key=cwd.replace("/", "-"))
+    assert mod._on_executive(ns) == 0
+    assert captured_tmp_paths, "expected at least one .tmp write"
+    assert f".{_os.getpid()}.tmp" in captured_tmp_paths[0]
+
+
+def test_session_start_surfaces_schema_downgrade_error(tmp_path, monkeypatch):
+    """If MemoryDB._migrate raises RuntimeError mid-SessionStart, the hook must
+    NOT crash. Error must be surfaced in systemMessage so the user sees it.
+    """
+    import importlib.util
+    import io as _io
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    spec = importlib.util.spec_from_file_location("engram_mod", ENGRAM)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def raising_run(ns, out=None):
+        raise RuntimeError("memory.db schema version 99 is newer than this engram build supports")
+
+    monkeypatch.setattr(mod.memcapture, "run", raising_run)
+
+    payload = _json.dumps({"cwd": str(tmp_path / "proj"), "session_id": "t"})
+    monkeypatch.setattr("sys.stdin", _io.StringIO(payload))
+
+    captured = _io.StringIO()
+    monkeypatch.setattr("sys.stdout", captured)
+    # Hook must complete with exit 0 even though both memcap calls raise.
+    assert mod._on_session_start(None) == 0
+    out = _json.loads(captured.getvalue())
+    assert out["continue"] is True
+    assert "schema version" in out.get("systemMessage", "")
+
+
 def test_preview_prev_reads_rotated_cache(tmp_path, monkeypatch):
     """`engram preview --prev` prints the .prev file and never rebuilds."""
     fake_home = tmp_path / "home"
