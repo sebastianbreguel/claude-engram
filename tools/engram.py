@@ -130,6 +130,35 @@ def _score_turn(role: str, text: str) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _read_tail_lines(path: Path, n: int, chunk_size: int = 64 * 1024) -> list[str]:
+    """Read approximately the last ``n`` lines without loading the full file.
+
+    Seeks from end backwards in 64KB chunks until ``n`` line breaks are found
+    (or BOF). Preserves trailing newline of each line. UTF-8 decode is lenient.
+    """
+    if n <= 0:
+        return []
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    if size == 0:
+        return []
+    data = b""
+    newlines = 0
+    with path.open("rb") as fh:
+        pos = size
+        while pos > 0 and newlines <= n:
+            read = min(chunk_size, pos)
+            pos -= read
+            fh.seek(pos)
+            data = fh.read(read) + data
+            newlines = data.count(b"\n")
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines(keepends=True)
+    return lines[-n:]
+
+
 def _extract_chunk(transcript: Path, tail_lines: int = 800, max_chars: int = 6000) -> str:
     """Extract tail of transcript, compressed by salience when over budget.
 
@@ -138,12 +167,7 @@ def _extract_chunk(transcript: Path, tail_lines: int = 800, max_chars: int = 600
       2. From remaining older turns, pack highest-salience first until max_chars.
       3. Re-emit in chronological order with '...' between non-contiguous kept turns.
     """
-    from collections import deque
-
-    tail: deque[str] = deque(maxlen=tail_lines)
-    with transcript.open(encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
-            tail.append(raw)
+    tail = _read_tail_lines(transcript, tail_lines)
 
     turns: list[tuple[str, str, float]] = []
     for raw in tail:
@@ -1039,14 +1063,21 @@ def _on_session_start(_args: argparse.Namespace) -> int:
     # banner. All other exceptions still propagate (real bugs deserve traces).
     schema_error: str | None = None
 
+    # Share one MemoryDB across inject+banner so SessionStart opens at most one connection.
+    shared_db: "memcapture.MemoryDB | None" = None
+    try:
+        shared_db = memcapture.MemoryDB()
+    except RuntimeError as e:
+        schema_error = str(e)
+
     if executive:
         context = executive
     else:
         buf = io.StringIO()
         try:
-            memcapture.run(_memcap_ns(inject=True, inject_project=project_key or None), out=buf)
+            memcapture.run(_memcap_ns(inject=True, inject_project=project_key or None), out=buf, db=shared_db)
         except RuntimeError as e:
-            schema_error = str(e)
+            schema_error = schema_error or str(e)
         context = buf.getvalue()
 
     banner = ""
@@ -1061,6 +1092,7 @@ def _on_session_start(_args: argparse.Namespace) -> int:
                     banner_name=display_name or None,
                 ),
                 out=buf2,
+                db=shared_db,
             )
         except RuntimeError as e:
             schema_error = schema_error or str(e)
@@ -1073,6 +1105,9 @@ def _on_session_start(_args: argparse.Namespace) -> int:
             else:
                 exec_text = executive
             banner = f"{header}\n{exec_text}" if header else exec_text
+
+    if shared_db is not None:
+        shared_db.close()
 
     if schema_error:
         banner = f"engram: {schema_error}" + (f"\n{banner}" if banner else "")

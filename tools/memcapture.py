@@ -1118,10 +1118,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(args: argparse.Namespace, out: TextIO | None = None, input_text: str | None = None) -> int:
+def run(
+    args: argparse.Namespace,
+    out: TextIO | None = None,
+    input_text: str | None = None,
+    db: "MemoryDB | None" = None,
+) -> int:
     import contextlib
 
-    db = MemoryDB()
+    owns_db = db is None
+    if db is None:
+        db = MemoryDB()
     transcript_parser = TranscriptParser()
 
     stack = contextlib.ExitStack()
@@ -1297,7 +1304,8 @@ def run(args: argparse.Namespace, out: TextIO | None = None, input_text: str | N
                 print("Session already captured")
 
     finally:
-        db.close()
+        if owns_db:
+            db.close()
 
     return 0
 

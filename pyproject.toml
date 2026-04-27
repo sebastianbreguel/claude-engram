@@ -13,6 +13,12 @@ line-length = 140
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
+[tool.ruff.lint.per-file-ignores]
+# E501 in prompts, SQL inserts, and formatted output strings — wrapping hurts readability/grep-ability
+"tools/engram.py" = ["E501"]
+"tools/memcapture.py" = ["E501"]
+"tests/test_e2e.py" = ["E501"]
+
 [tool.ruff.format]
 quote-style = "double"
 

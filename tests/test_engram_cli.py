@@ -219,6 +219,27 @@ def test_extract_chunk_keeps_recency_and_salience(tmp_path):
     assert "..." in out, "compressed output should contain gap marker"
 
 
+def test_read_tail_lines_skips_early_content(tmp_path):
+    """_read_tail_lines must not load the full file — verify it returns only
+    the trailing N lines and the early content is absent from the result."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("engram_mod", ENGRAM)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    f = tmp_path / "big.txt"
+    # 10k lines, distinct markers at start vs end
+    lines = [f"EARLY_{i}\n" for i in range(5000)] + [f"LATE_{i}\n" for i in range(5000)]
+    f.write_text("".join(lines))
+
+    tail = mod._read_tail_lines(f, n=100)
+    assert len(tail) == 100
+    assert tail[-1] == "LATE_4999\n"
+    assert tail[0] == "LATE_4900\n"
+    assert all(not ln.startswith("EARLY_") for ln in tail), "early content must not appear in tail"
+
+
 def test_search_runs_without_crash(tmp_path, monkeypatch):
     """`engram search <query>` exits 0 even against an empty DB."""
     fake_home = tmp_path / "home"
@@ -453,7 +474,7 @@ def test_session_start_surfaces_schema_downgrade_error(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    def raising_run(ns, out=None):
+    def raising_run(ns, out=None, db=None):
         raise RuntimeError("memory.db schema version 99 is newer than this engram build supports")
 
     monkeypatch.setattr(mod.memcapture, "run", raising_run)

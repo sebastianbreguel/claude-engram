@@ -352,9 +352,7 @@ def test_tool_anomalies_detected(tmp_db, wiki_dir):
                 None,
             ),
         )
-        conn.execute(
-            "INSERT INTO tool_usage VALUES (?,?,?,?)", (i * 2, sid, "Bash", 100)
-        )
+        conn.execute("INSERT INTO tool_usage VALUES (?,?,?,?)", (i * 2, sid, "Bash", 100))
     # Projects B, C, D: low Bash usage (avg 1) — global avg = (100+1+1+1)/4 = 25.75, ratio proj-a = 100/25.75 > 2
     for proj_idx, proj in enumerate(["proj-b", "proj-c", "proj-d"]):
         for i in range(3):
@@ -508,9 +506,7 @@ def test_entity_page_preserves_first_seen(wiki_dir):
     w.write_entity_page("src/auth.py", sessions=1, co_edits=[], errors=[])
     first_content = (wiki_dir / "entities" / "src-auth-py.md").read_text()
     # Extract first_seen line
-    first_seen_line = next(
-        line for line in first_content.splitlines() if "first_seen" in line
-    )
+    first_seen_line = next(line for line in first_content.splitlines() if "first_seen" in line)
 
     w.write_entity_page("src/auth.py", sessions=2, co_edits=[], errors=[])
     second_content = (wiki_dir / "entities" / "src-auth-py.md").read_text()
@@ -549,9 +545,7 @@ def test_pattern_page_update_preserves_first_detected_and_history(wiki_dir):
         description="desc",
     )
     first_content = (wiki_dir / "patterns" / "auth-middleware-pair.md").read_text()
-    first_detected = next(
-        line for line in first_content.splitlines() if "first_detected" in line
-    )
+    first_detected = next(line for line in first_content.splitlines() if "first_detected" in line)
 
     w.write_pattern_page(
         name="auth-middleware-pair",
@@ -593,9 +587,7 @@ def test_write_index(wiki_dir):
 # ---------------------------------------------------------------------------
 
 
-def _insert_co_edit_sessions(
-    conn, n: int, file_a: str = "a.py", file_b: str = "b.py", start_id: int = 0
-):
+def _insert_co_edit_sessions(conn, n: int, file_a: str = "a.py", file_b: str = "b.py", start_id: int = 0):
     for i in range(n):
         sid = f"sess-coedit-{start_id + i}"
         conn.execute(
@@ -659,9 +651,7 @@ class TestOrchestrator:
         assert pattern_files, "No pattern files created"
         pf = pattern_files[0]
         content = pf.read_text()
-        content = content.replace(
-            f"last_reinforced: {date.today()}", f"last_reinforced: {old_date}"
-        )
+        content = content.replace(f"last_reinforced: {date.today()}", f"last_reinforced: {old_date}")
         pf.write_text(content)
         # Run update again (no new data — same DB)
         orch2 = PatternsOrchestrator(db_path=db_path, wiki_dir=wiki_dir)
@@ -680,9 +670,7 @@ class TestOrchestrator:
         old_date = str(date.today() - timedelta(days=61))
         content = pf.read_text()
         content = content.replace("status: active", "status: stale")
-        content = content.replace(
-            f"last_reinforced: {date.today()}", f"last_reinforced: {old_date}"
-        )
+        content = content.replace(f"last_reinforced: {date.today()}", f"last_reinforced: {old_date}")
         pf.write_text(content)
         orch2 = PatternsOrchestrator(db_path=db_path, wiki_dir=wiki_dir)
         orch2._prune_stale()
