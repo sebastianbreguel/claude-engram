@@ -80,6 +80,44 @@ def _like_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+class _Janitor:
+    """Cleanup operations on the memories table. Shares the parent connection."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def cleanup_ephemeral(self) -> int:
+        cursor = self.conn.execute("DELETE FROM memories WHERE durability = 'ephemeral' AND created_at < datetime('now', '-7 days')")
+        self.conn.commit()
+        return cursor.rowcount
+
+    def cleanup_ephemeral_daily(self) -> int:
+        # mtime-guard so SessionStart's inject_context() doesn't pay DELETE cost every session
+        marker = Path.home() / ".claude" / ".engram-cleanup-stamp"
+        try:
+            from datetime import datetime
+
+            today = datetime.now().strftime("%Y-%m-%d")
+            if marker.exists() and marker.read_text().strip() == today:
+                return 0
+            count = self.cleanup_ephemeral()
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(today)
+            return count
+        except Exception:
+            return 0
+
+    def forget_memory(self, topic: str) -> bool:
+        cursor = self.conn.execute("DELETE FROM memories WHERE topic = ?", (topic,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def forget_all_ephemeral(self) -> int:
+        cursor = self.conn.execute("DELETE FROM memories WHERE durability = 'ephemeral'")
+        self.conn.commit()
+        return cursor.rowcount
+
+
 class MemoryDB:
     """SQLite-backed session memory store with FTS5 search."""
 
@@ -99,6 +137,7 @@ class MemoryDB:
         except Exception:
             self.conn.close()
             raise
+        self._janitor = _Janitor(self.conn)
 
     def _create_tables(self) -> None:
         self.conn.executescript("""
@@ -708,29 +747,10 @@ class MemoryDB:
         self.conn.commit()
 
     def cleanup_ephemeral(self) -> int:
-        cursor = self.conn.execute("DELETE FROM memories WHERE durability = 'ephemeral' AND created_at < datetime('now', '-7 days')")
-        self.conn.commit()
-        return cursor.rowcount
+        return self._janitor.cleanup_ephemeral()
 
     def _cleanup_ephemeral_daily(self) -> int:
-        """Run cleanup_ephemeral at most once per calendar day.
-
-        Uses an mtime-guard marker file so that SessionStart — which calls
-        inject_context() — doesn't pay the DELETE cost on every session.
-        """
-        marker = Path.home() / ".claude" / ".engram-cleanup-stamp"
-        try:
-            from datetime import datetime
-
-            today = datetime.now().strftime("%Y-%m-%d")
-            if marker.exists() and marker.read_text().strip() == today:
-                return 0
-            count = self.cleanup_ephemeral()
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(today)
-            return count
-        except Exception:
-            return 0
+        return self._janitor.cleanup_ephemeral_daily()
 
     def list_memories(self, topic_pattern: str | None = None) -> list[dict]:
         if topic_pattern:
@@ -745,14 +765,10 @@ class MemoryDB:
         return [dict(r) for r in rows]
 
     def forget_memory(self, topic: str) -> bool:
-        cursor = self.conn.execute("DELETE FROM memories WHERE topic = ?", (topic,))
-        self.conn.commit()
-        return cursor.rowcount > 0
+        return self._janitor.forget_memory(topic)
 
     def forget_all_ephemeral(self) -> int:
-        cursor = self.conn.execute("DELETE FROM memories WHERE durability = 'ephemeral'")
-        self.conn.commit()
-        return cursor.rowcount
+        return self._janitor.forget_all_ephemeral()
 
     def save_compaction(self, session_id: str | None, project: str, snapshot: str | None = None) -> None:
         self.conn.execute(
