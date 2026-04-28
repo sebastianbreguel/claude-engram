@@ -26,9 +26,34 @@ def tmp_home(tmp_path, monkeypatch):
     return fake_home
 
 
+_FLAG_TO_SUBCMD = {
+    "--stats": ["stats"],
+    "--memories": ["memories"],
+    "--inject": ["inject"],
+    "--ingest-digest": ["digest"],
+    "--ingest-snapshot": ["snapshot"],
+}
+
+
+def _translate(args: list[str]) -> list[str]:
+    """Translate legacy memcapture flags to engram subcommand form."""
+    if not args:
+        return args
+    head = args[0]
+    rest = args[1:]
+    if head == "--transcript":
+        return ["capture", "--transcript", *rest]
+    if head == "--inject" and "--inject-project" in rest:
+        i = rest.index("--inject-project")
+        return ["inject", "--project", rest[i + 1], *rest[:i], *rest[i + 2 :]]
+    if head in _FLAG_TO_SUBCMD:
+        return [*_FLAG_TO_SUBCMD[head], *rest]
+    return args
+
+
 def _memcap(args: list[str], **kw) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["uv", "run", str(REPO / "tools" / "memcapture.py"), *args],
+        ["uv", "run", str(REPO / "tools" / "engram.py"), *_translate(args)],
         cwd=str(REPO),
         capture_output=True,
         text=True,

@@ -1087,53 +1087,6 @@ def find_current_session() -> tuple[Path, str] | None:
     return None
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="engram — persistent memory for Claude Code",
-        epilog="Advanced/internal flags (used by hooks) are hidden. See docs/cli-reference.md.",
-    )
-    # User-facing flags (4 essentials)
-    parser.add_argument("--stats", action="store_true", help="Show what engram has learned")
-    parser.add_argument("--query", "-q", type=str, metavar="TERM", help="Search captured facts")
-    parser.add_argument(
-        "--memories",
-        nargs="?",
-        const="*",
-        metavar="PATTERN",
-        help="List learned memories (optional topic pattern)",
-    )
-    parser.add_argument("--forget", type=str, metavar="TOPIC", help="Delete a memory by topic")
-
-    # Hook-internal flags (hidden from --help but still functional)
-    parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--recent", type=int, metavar="N", help=argparse.SUPPRESS)
-    parser.add_argument("--inject", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--inject-project", type=str, help=argparse.SUPPRESS)
-    parser.add_argument("--banner", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--banner-project", type=str, help=argparse.SUPPRESS)
-    parser.add_argument("--banner-name", type=str, help=argparse.SUPPRESS)
-    parser.add_argument("--transcript", type=str, help=argparse.SUPPRESS)
-    parser.add_argument(
-        "--extract-facts",
-        action="store_true",
-        default=bool(os.environ.get("MEMCAPTURE_EXTRACT_FACTS")),
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument("--ingest-digest", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--session-id", type=str, help=argparse.SUPPRESS)
-    parser.add_argument("--ephemeral", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--ingest-snapshot", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--project", type=str, help=argparse.SUPPRESS)
-    parser.add_argument(
-        "--compactions",
-        nargs="?",
-        const="*",
-        metavar="PROJECT",
-        help=argparse.SUPPRESS,
-    )
-    return parser
-
-
 def run(
     args: argparse.Namespace,
     out: TextIO | None = None,
@@ -1324,11 +1277,3 @@ def run(
             db.close()
 
     return 0
-
-
-def main() -> int:
-    return run(build_parser().parse_args()) or 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
