@@ -709,20 +709,6 @@ def propose_memories(project_filter: str | None) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="engram doctor — friction signal detection")
-    p.add_argument("--project", type=str, default=None, help="filter by project path substring")
-    p.add_argument("--rules", action="store_true", help="print CLAUDE.md rule suggestions")
-    p.add_argument("--per-project", action="store_true", help="with --rules, emit one rule block per project")
-    p.add_argument(
-        "--propose",
-        action="store_true",
-        help=f"propose feedback memories from the most recent session (requires ≥{PROPOSE_MIN_CORRECTIONS} corrections)",
-    )
-    p.add_argument("--json", action="store_true", help="emit machine-readable JSON instead of human-readable summary")
-    return p
-
-
 def _json_payload(report: dict, want_rules: bool) -> dict:
     sessions = report["sessions"]
     totals = report["totals"]
@@ -763,11 +749,3 @@ def run(args: argparse.Namespace) -> int:
     else:
         _print_summary(report)
     return 0
-
-
-def main() -> int:
-    return run(build_parser().parse_args())
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
