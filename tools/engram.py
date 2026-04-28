@@ -35,46 +35,6 @@ import memdoctor  # noqa: E402
 import mempatterns  # noqa: E402
 
 
-def _memcap_ns(**overrides) -> argparse.Namespace:
-    """Base Namespace for memcapture.run() with all flags defaulted off."""
-    defaults = dict(
-        transcript=None,
-        all=False,
-        recent=None,
-        query=None,
-        stats=False,
-        memories=None,
-        forget=None,
-        inject=False,
-        inject_project=None,
-        banner=False,
-        banner_project=None,
-        banner_name=None,
-        ingest_digest=False,
-        ingest_snapshot=False,
-        session_id=None,
-        project=None,
-        ephemeral=False,
-        extract_facts=False,
-        compactions=None,
-    )
-    defaults.update(overrides)
-    return argparse.Namespace(**defaults)
-
-
-def _patterns_ns(update: bool = False, status: bool = False, report: bool = False) -> argparse.Namespace:
-    return argparse.Namespace(
-        update=update,
-        rebuild=False,
-        status=status,
-        report=report,
-        suggest=False,
-        forget=None,
-        db_path=Path.home() / ".claude" / "memory.db",
-        wiki_dir=Path.home() / ".claude" / "patterns",
-    )
-
-
 def _log_warning(msg: str) -> None:
     """Append a timestamped line to ~/.claude/engram.log. Never raises."""
     try:
@@ -486,7 +446,7 @@ def _on_precompact(_args: argparse.Namespace) -> int:
     import memcapture
 
     try:
-        memcapture.run(_memcap_ns(transcript=str(transcript)))
+        memcapture.capture(transcript=str(transcript))
     except Exception as e:
         print(f"capture error: {e}", file=sys.stderr)
 
@@ -509,20 +469,7 @@ def _on_precompact(_args: argparse.Namespace) -> int:
     import mempatterns
 
     try:
-        from pathlib import Path as _P
-
-        mempatterns.run(
-            argparse.Namespace(
-                update=True,
-                rebuild=False,
-                status=False,
-                report=False,
-                suggest=False,
-                forget=None,
-                db_path=_P.home() / ".claude" / "memory.db",
-                wiki_dir=_P.home() / ".claude" / "patterns",
-            )
-        )
+        mempatterns.update_now()
     except Exception as e:
         print(f"patterns error: {e}", file=sys.stderr)
 
@@ -666,10 +613,9 @@ def _run_llm(args: argparse.Namespace) -> int:
         return 0
     import memcapture
 
-    return memcapture.run(
-        _memcap_ns(**{cfg["ingest"]: True, "session_id": args.session_id, "project": args.project}),
-        input_text=output,
-    )
+    if cfg["ingest"] == "ingest_digest":
+        return memcapture.ingest_digest(args.session_id, args.project, output)
+    return memcapture.ingest_snapshot(args.session_id, args.project, output)
 
 
 def _on_executive(args: argparse.Namespace) -> int:
@@ -689,7 +635,7 @@ def _on_executive(args: argparse.Namespace) -> int:
 
     buf = io.StringIO()
     try:
-        memcapture.run(_memcap_ns(inject=True, inject_project=project_key or None), out=buf)
+        memcapture.inject(project_key or None, out=buf)
     except Exception as e:
         _log_warning(f"executive: inject_context failed: {e}")
     context = buf.getvalue().strip()
@@ -811,7 +757,7 @@ def _forget(args: argparse.Namespace) -> int:
             for r in rows:
                 print(f"(dry-run) would forget: [{r['durability']}] {r['topic']}")
             return 0
-        return memcapture.run(_memcap_ns(forget=args.topic)) or 0
+        return memcapture.forget_topic(args.topic) or 0
 
     db = memcapture.MemoryDB()
     if args.expired:
@@ -1075,7 +1021,7 @@ def _on_session_start(_args: argparse.Namespace) -> int:
     else:
         buf = io.StringIO()
         try:
-            memcapture.run(_memcap_ns(inject=True, inject_project=project_key or None), out=buf, db=shared_db)
+            memcapture.inject(project_key or None, out=buf, db=shared_db)
         except RuntimeError as e:
             schema_error = schema_error or str(e)
         context = buf.getvalue()
@@ -1085,12 +1031,9 @@ def _on_session_start(_args: argparse.Namespace) -> int:
         buf2 = io.StringIO()
         display_name = Path(cwd).name if cwd else ""
         try:
-            memcapture.run(
-                _memcap_ns(
-                    banner=True,
-                    banner_project=project_key or None,
-                    banner_name=display_name or None,
-                ),
+            memcapture.banner(
+                project_key or None,
+                display_name or None,
                 out=buf2,
                 db=shared_db,
             )
@@ -1134,30 +1077,40 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("capture", help="capture a session")
     c.add_argument("--transcript", default=None)
     c.add_argument("--all", action="store_true")
-    c.set_defaults(func=lambda a: memcapture.run(_memcap_ns(transcript=a.transcript, all=a.all)))
+    c.set_defaults(func=lambda a: memcapture.capture(transcript=a.transcript, all_=a.all))
 
     i = sub.add_parser("inject", help="produce SessionStart context")
     i.add_argument("--project", default=None)
-    i.set_defaults(func=lambda a: memcapture.run(_memcap_ns(inject=True, inject_project=a.project)))
+    i.set_defaults(func=lambda a: memcapture.inject(a.project))
 
     d = sub.add_parser("digest", help="ingest LLM digest from stdin")
     d.add_argument("--session-id", dest="session_id", default=None)
     d.add_argument("--project", default=None)
-    d.set_defaults(func=lambda a: memcapture.run(_memcap_ns(ingest_digest=True, session_id=a.session_id, project=a.project)))
+    d.set_defaults(func=lambda a: memcapture.ingest_digest(a.session_id, a.project, sys.stdin.read()))
 
     s = sub.add_parser("snapshot", help="ingest work-state snapshot from stdin")
     s.add_argument("--session-id", dest="session_id", default=None)
     s.add_argument("--project", default=None)
-    s.set_defaults(func=lambda a: memcapture.run(_memcap_ns(ingest_snapshot=True, session_id=a.session_id, project=a.project)))
+    s.set_defaults(func=lambda a: memcapture.ingest_snapshot(a.session_id, a.project, sys.stdin.read()))
 
     pt = sub.add_parser("patterns", help="pattern detection + wiki")
     pt.add_argument("--update", action="store_true")
     pt.add_argument("--status", action="store_true")
     pt.add_argument("--report", action="store_true")
-    pt.set_defaults(func=lambda a: mempatterns.run(_patterns_ns(update=a.update, status=a.status, report=a.report)))
+
+    def _patterns_dispatch(a: argparse.Namespace) -> int:
+        if a.update:
+            return mempatterns.update_now()
+        if a.status:
+            return mempatterns.status_now()
+        if a.report:
+            return mempatterns.report_now()
+        return 0
+
+    pt.set_defaults(func=_patterns_dispatch)
 
     st = sub.add_parser("stats", help="capture statistics")
-    st.set_defaults(func=lambda _a: memcapture.run(_memcap_ns(stats=True)))
+    st.set_defaults(func=lambda _a: memcapture.stats())
 
     us = sub.add_parser("usage", help="count agent/skill/plugin invocations (stalest first)")
     us.set_defaults(func=_usage)
@@ -1167,7 +1120,7 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=_self_check)
 
     mm = sub.add_parser("memories", help="list learned memories")
-    mm.set_defaults(func=lambda _a: memcapture.run(_memcap_ns(memories="*")))
+    mm.set_defaults(func=lambda _a: memcapture.list_memories("*"))
 
     fg = sub.add_parser("forget", help="delete memory by topic, by project scope, or by expiry")
     fg.add_argument("topic", nargs="?", default=None, help="topic to forget (omit when using --expired or --project)")
@@ -1180,7 +1133,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sr = sub.add_parser("search", help="FTS5 search over captured facts")
     sr.add_argument("query", help="search term (FTS5 syntax supported)")
-    sr.set_defaults(func=lambda a: memcapture.run(_memcap_ns(query=a.query)))
+    sr.set_defaults(func=lambda a: memcapture.search(a.query))
 
     lg = sub.add_parser("log", help="tail engram.log (background LLM failures, timestamps)")
     lg.add_argument("--tail", type=int, default=20, metavar="N", help="last N lines (default: 20)")

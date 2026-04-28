@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sqlite3
@@ -556,32 +555,41 @@ class PatternsOrchestrator:
         )
 
 
-def run(args: argparse.Namespace) -> int:
-    orch = PatternsOrchestrator(db_path=args.db_path, wiki_dir=args.wiki_dir)
+_DEFAULT_DB = Path.home() / ".claude" / "memory.db"
+_DEFAULT_WIKI = Path.home() / ".claude" / "patterns"
 
-    if args.update or args.rebuild:
-        new = orch.update()
-        if new:
-            print(f"New patterns detected: {len(new)}")
-            for p in new:
-                name = orch._pattern_name(p)
-                print(f"  + {name} ({p['kind']})")
 
-    if args.report:
-        print(orch.report())
+def _orch(db_path: Path | None = None, wiki_dir: Path | None = None) -> "PatternsOrchestrator":
+    return PatternsOrchestrator(db_path=db_path or _DEFAULT_DB, wiki_dir=wiki_dir or _DEFAULT_WIKI)
 
-    if args.suggest:
-        pending = args.wiki_dir / "suggestions" / "pending.md"
-        if pending.exists():
-            print(pending.read_text())
-        else:
-            print("No suggestions.")
 
-    if args.status:
-        print(orch.status())
+def update_now(*, db_path: Path | None = None, wiki_dir: Path | None = None) -> int:
+    orch = _orch(db_path, wiki_dir)
+    new = orch.update()
+    if new:
+        print(f"New patterns detected: {len(new)}")
+        for p in new:
+            print(f"  + {orch._pattern_name(p)} ({p['kind']})")
+    return 0
 
-    if args.forget:
-        found = orch.forget(args.forget)
-        print(f"Deleted: {args.forget}" if found else f"Not found: {args.forget}")
 
+def status_now(*, db_path: Path | None = None, wiki_dir: Path | None = None) -> int:
+    print(_orch(db_path, wiki_dir).status())
+    return 0
+
+
+def report_now(*, db_path: Path | None = None, wiki_dir: Path | None = None) -> int:
+    print(_orch(db_path, wiki_dir).report())
+    return 0
+
+
+def suggestions_now(*, wiki_dir: Path | None = None) -> int:
+    pending = (wiki_dir or _DEFAULT_WIKI) / "suggestions" / "pending.md"
+    print(pending.read_text() if pending.exists() else "No suggestions.")
+    return 0
+
+
+def forget_pattern(name: str, *, db_path: Path | None = None, wiki_dir: Path | None = None) -> int:
+    found = _orch(db_path, wiki_dir).forget(name)
+    print(f"Deleted: {name}" if found else f"Not found: {name}")
     return 0

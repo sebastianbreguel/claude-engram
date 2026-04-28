@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""memcapture — Automatic session memory capture into SQLite.
+"""memcapture — automatic session memory capture into SQLite.
 
 Reads JSONL transcripts from Claude Code sessions and extracts useful facts
 (decisions, corrections, files touched, tool patterns, errors) using heuristics.
 No LLM calls — zero token cost.
 
-Usage:
-    uv run ~/.claude/tools/memcapture.py                    # capture current session
-    uv run ~/.claude/tools/memcapture.py --all              # capture all uncaptured sessions
-    uv run ~/.claude/tools/memcapture.py --query "react"    # FTS5 search captured facts
-    uv run ~/.claude/tools/memcapture.py --stats            # show capture statistics
-    uv run ~/.claude/tools/memcapture.py --recent 5         # show last N sessions
-    uv run ~/.claude/tools/memcapture.py --inject           # output context for SessionStart (~200 tokens)
+Public API: kwarg functions called by tools/engram.py — search, stats, recent,
+inject, banner, ingest_digest, ingest_snapshot, compactions, list_memories,
+forget_topic, forget_all_ephemeral, capture.
 """
 # /// script
 # requires-python = ">=3.12"
@@ -20,7 +16,7 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -1087,193 +1083,221 @@ def find_current_session() -> tuple[Path, str] | None:
     return None
 
 
-def run(
-    args: argparse.Namespace,
-    out: TextIO | None = None,
-    input_text: str | None = None,
-    db: "MemoryDB | None" = None,
-) -> int:
-    import contextlib
-
-    owns_db = db is None
-    if db is None:
-        db = MemoryDB()
-    transcript_parser = TranscriptParser()
-
+@contextlib.contextmanager
+def _session(db: "MemoryDB | None", out: TextIO | None = None):
+    """Open MemoryDB if not provided; redirect stdout to ``out`` if provided."""
+    owns = db is None
+    actual = MemoryDB() if owns else db
     stack = contextlib.ExitStack()
     if out is not None:
         stack.enter_context(contextlib.redirect_stdout(out))
-
     try:
         with stack:
-            if args.query:
-                results = db.search(args.query)
-                if not results:
-                    print(f"No facts matching '{args.query}'")
-                    return
-                for r in results:
-                    print(f"  [{r['type']:10s}] [{r['project'][:30]}] {r['content'][:120]}")
-                print(f"\n{len(results)} results")
-                return
-
-            if args.stats:
-                s = db.stats()
-                cs = db.compaction_stats()
-                mem_rows = db.conn.execute("SELECT durability, COUNT(*) as c FROM memories GROUP BY durability").fetchall()
-                mem_counts = {r["durability"]: r["c"] for r in mem_rows}
-                durable = mem_counts.get("durable", 0)
-                ephemeral = mem_counts.get("ephemeral", 0)
-
-                top_projects = db.conn.execute(
-                    "SELECT project, COUNT(*) as c FROM sessions GROUP BY project ORDER BY c DESC LIMIT 5"
-                ).fetchall()
-
-                patterns_dir = Path.home() / ".claude" / "patterns" / "patterns"
-                pattern_count = len(list(patterns_dir.glob("*.md"))) if patterns_dir.exists() else 0
-
-                print("engram — what I've learned about you\n")
-                print(f"  {s['sessions']:>5} sessions captured, {cs['total']} compactions processed")
-                print(f"  {s['unique_files']:>5} unique files touched")
-                print(f"  {durable:>5} preferences remembered (durable)")
-                print(f"  {ephemeral:>5} context notes active (ephemeral)")
-                print(f"  {pattern_count:>5} patterns detected in wiki")
-
-                if top_projects:
-                    print("\nMost active projects:")
-                    for r in top_projects:
-                        raw = r["project"] or "?"
-                        # Claude Code project slugs use "-" as path separator; take last segment
-                        proj = raw.rstrip("-").split("-")[-1][:40] or raw[:40]
-                        print(f"  • {proj:40s} {r['c']} sessions")
-
-                if s["top_tools"]:
-                    print("\nYour top tools:")
-                    for name, count in s["top_tools"][:5]:
-                        print(f"  • {name:25s} {count}")
-                return
-
-            if args.recent:
-                sessions = db.recent_sessions(args.recent)
-                for s in sessions:
-                    topic = (s["topic"] or "")[:50]
-                    print(
-                        f"  {s['captured_at'][:16]}  {s['project'][:35]:35s}  msgs={s['message_count']:3d}  facts={s['fact_count']:2d}  branch={s['branch'] or '-':15s}  {topic}"
-                    )
-                return
-
-            if args.inject:
-                print(db.inject_context(args.inject_project))
-                return
-
-            if args.banner:
-                print(db.build_banner(args.banner_project, args.banner_name))
-                return
-
-            if args.ingest_digest:
-                text = input_text if input_text is not None else sys.stdin.read()
-                memories = parse_digest_output(text, project=args.project)
-                for m in memories:
-                    db.upsert_memory(
-                        m["topic"],
-                        m["content"],
-                        m["durability"],
-                        source_session=args.session_id,
-                    )
-                print(f"Ingested {len(memories)} memories")
-                return
-
-            if args.ingest_snapshot:
-                text = (input_text if input_text is not None else sys.stdin.read()).strip()
-                project = args.project or "unknown"
-                session_id = args.session_id
-                snapshot = text if text else None
-                db.save_compaction(session_id, project, snapshot)
-                print(f"Compaction recorded for {project}" + (" with snapshot" if snapshot else ""))
-                return
-
-            if args.compactions is not None:
-                if args.compactions == "*":
-                    rows = db.conn.execute(
-                        "SELECT project, session_id, compacted_at, CASE WHEN snapshot IS NOT NULL THEN 'yes' ELSE 'no' END as has_snapshot FROM compactions ORDER BY compacted_at DESC LIMIT 20"
-                    ).fetchall()
-                else:
-                    rows = db.conn.execute(
-                        "SELECT project, session_id, compacted_at, CASE WHEN snapshot IS NOT NULL THEN 'yes' ELSE 'no' END as has_snapshot FROM compactions WHERE project LIKE ? ESCAPE '\\' ORDER BY compacted_at DESC LIMIT 20",
-                        (f"%{_like_escape(args.compactions)}%",),
-                    ).fetchall()
-                if not rows:
-                    print("No compactions recorded")
-                    return
-                for r in rows:
-                    sid = (r["session_id"] or "?")[:8]
-                    print(f"  {r['compacted_at'][:16]}  {r['project'][:40]:40s}  session={sid}  snapshot={r['has_snapshot']}")
-                print(f"\n{len(rows)} compaction events")
-                return
-
-            if args.memories is not None:
-                pattern = None if args.memories == "*" else args.memories.replace("*", "%")
-                memories = db.list_memories(pattern)
-                if not memories:
-                    print("No memories found")
-                    return
-                for m in memories:
-                    dur = "D" if m["durability"] == "durable" else "E"
-                    print(f"  [{dur}] {m['topic']:30s} {m['content'][:80]}")
-                print(
-                    f"\n{len(memories)} memories ({sum(1 for m in memories if m['durability'] == 'durable')} durable, {sum(1 for m in memories if m['durability'] == 'ephemeral')} ephemeral)"
-                )
-                return
-
-            if args.forget:
-                if args.ephemeral:
-                    count = db.forget_all_ephemeral()
-                    print(f"Deleted {count} ephemeral memories")
-                else:
-                    if db.forget_memory(args.forget):
-                        print(f"Forgot: {args.forget}")
-                    else:
-                        print(f"No memory with topic: {args.forget}")
-                return
-
-            # Capture mode
-            if args.transcript:
-                transcripts = [(Path(args.transcript), Path(args.transcript).parent.name)]
-            elif args.all:
-                transcripts = find_transcripts()
-            else:
-                result = find_current_session()
-                if result is None:
-                    print("No transcript found for current session")
-                    sys.exit(1)
-                transcripts = [result]
-
-            captured = 0
-            skipped = 0
-            for path, project in transcripts:
-                session_id = path.stem
-                if db.is_captured(session_id):
-                    skipped += 1
-                    continue
-
-                session = transcript_parser.parse_file(path, project, extract_facts=args.extract_facts)
-                if session is None:
-                    skipped += 1
-                    continue
-
-                db.save_session(session)
-                captured += 1
-                if not args.all:
-                    print(
-                        f"Captured: {session_id[:8]}  msgs={session.message_count}  tools={session.tool_count}  facts={len(session.facts)}  files={len(session.files)}  topic={session.topic or '-'}"
-                    )
-
-            if args.all:
-                print(f"Captured {captured} sessions, skipped {skipped} (already captured or trivial)")
-            elif captured == 0 and skipped > 0:
-                print("Session already captured")
-
+            yield actual
     finally:
-        if owns_db:
-            db.close()
+        if owns:
+            actual.close()
 
+
+def search(query: str, *, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        results = d.search(query)
+        if not results:
+            print(f"No facts matching '{query}'")
+            return 0
+        for r in results:
+            print(f"  [{r['type']:10s}] [{r['project'][:30]}] {r['content'][:120]}")
+        print(f"\n{len(results)} results")
+    return 0
+
+
+def stats(*, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        s = d.stats()
+        cs = d.compaction_stats()
+        mem_rows = d.conn.execute("SELECT durability, COUNT(*) as c FROM memories GROUP BY durability").fetchall()
+        mem_counts = {r["durability"]: r["c"] for r in mem_rows}
+        durable = mem_counts.get("durable", 0)
+        ephemeral = mem_counts.get("ephemeral", 0)
+
+        top_projects = d.conn.execute("SELECT project, COUNT(*) as c FROM sessions GROUP BY project ORDER BY c DESC LIMIT 5").fetchall()
+
+        patterns_dir = Path.home() / ".claude" / "patterns" / "patterns"
+        pattern_count = len(list(patterns_dir.glob("*.md"))) if patterns_dir.exists() else 0
+
+        print("engram — what I've learned about you\n")
+        print(f"  {s['sessions']:>5} sessions captured, {cs['total']} compactions processed")
+        print(f"  {s['unique_files']:>5} unique files touched")
+        print(f"  {durable:>5} preferences remembered (durable)")
+        print(f"  {ephemeral:>5} context notes active (ephemeral)")
+        print(f"  {pattern_count:>5} patterns detected in wiki")
+
+        if top_projects:
+            print("\nMost active projects:")
+            for r in top_projects:
+                raw = r["project"] or "?"
+                # Claude Code project slugs use "-" as path separator; take last segment
+                proj = raw.rstrip("-").split("-")[-1][:40] or raw[:40]
+                print(f"  • {proj:40s} {r['c']} sessions")
+
+        if s["top_tools"]:
+            print("\nYour top tools:")
+            for name, count in s["top_tools"][:5]:
+                print(f"  • {name:25s} {count}")
+    return 0
+
+
+def recent(n: int, *, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        for s in d.recent_sessions(n):
+            topic = (s["topic"] or "")[:50]
+            print(
+                f"  {s['captured_at'][:16]}  {s['project'][:35]:35s}  msgs={s['message_count']:3d}  facts={s['fact_count']:2d}  branch={s['branch'] or '-':15s}  {topic}"
+            )
+    return 0
+
+
+def inject(project: str | None, *, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        print(d.inject_context(project))
+    return 0
+
+
+def banner(project: str | None, name: str | None, *, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        print(d.build_banner(project, name))
+    return 0
+
+
+def ingest_digest(
+    session_id: str | None,
+    project: str | None,
+    text: str,
+    *,
+    db: "MemoryDB | None" = None,
+    out: TextIO | None = None,
+) -> int:
+    with _session(db, out) as d:
+        memories = parse_digest_output(text, project=project)
+        for m in memories:
+            d.upsert_memory(m["topic"], m["content"], m["durability"], source_session=session_id)
+        print(f"Ingested {len(memories)} memories")
+    return 0
+
+
+def ingest_snapshot(
+    session_id: str | None,
+    project: str | None,
+    text: str,
+    *,
+    db: "MemoryDB | None" = None,
+    out: TextIO | None = None,
+) -> int:
+    with _session(db, out) as d:
+        body = text.strip()
+        proj = project or "unknown"
+        snapshot = body if body else None
+        d.save_compaction(session_id, proj, snapshot)
+        print(f"Compaction recorded for {proj}" + (" with snapshot" if snapshot else ""))
+    return 0
+
+
+def compactions(filter_str: str, *, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        if filter_str == "*":
+            rows = d.conn.execute(
+                "SELECT project, session_id, compacted_at, CASE WHEN snapshot IS NOT NULL THEN 'yes' ELSE 'no' END as has_snapshot FROM compactions ORDER BY compacted_at DESC LIMIT 20"
+            ).fetchall()
+        else:
+            rows = d.conn.execute(
+                "SELECT project, session_id, compacted_at, CASE WHEN snapshot IS NOT NULL THEN 'yes' ELSE 'no' END as has_snapshot FROM compactions WHERE project LIKE ? ESCAPE '\\' ORDER BY compacted_at DESC LIMIT 20",
+                (f"%{_like_escape(filter_str)}%",),
+            ).fetchall()
+        if not rows:
+            print("No compactions recorded")
+            return 0
+        for r in rows:
+            sid = (r["session_id"] or "?")[:8]
+            print(f"  {r['compacted_at'][:16]}  {r['project'][:40]:40s}  session={sid}  snapshot={r['has_snapshot']}")
+        print(f"\n{len(rows)} compaction events")
+    return 0
+
+
+def list_memories(pattern_str: str, *, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        pattern = None if pattern_str == "*" else pattern_str.replace("*", "%")
+        memories = d.list_memories(pattern)
+        if not memories:
+            print("No memories found")
+            return 0
+        for m in memories:
+            dur = "D" if m["durability"] == "durable" else "E"
+            print(f"  [{dur}] {m['topic']:30s} {m['content'][:80]}")
+        print(
+            f"\n{len(memories)} memories ({sum(1 for m in memories if m['durability'] == 'durable')} durable, {sum(1 for m in memories if m['durability'] == 'ephemeral')} ephemeral)"
+        )
+    return 0
+
+
+def forget_topic(topic: str, *, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        if d.forget_memory(topic):
+            print(f"Forgot: {topic}")
+        else:
+            print(f"No memory with topic: {topic}")
+    return 0
+
+
+def forget_all_ephemeral(*, db: "MemoryDB | None" = None, out: TextIO | None = None) -> int:
+    with _session(db, out) as d:
+        count = d.forget_all_ephemeral()
+        print(f"Deleted {count} ephemeral memories")
+    return 0
+
+
+def capture(
+    transcript: str | Path | None = None,
+    *,
+    all_: bool = False,
+    extract_facts: bool = False,
+    db: "MemoryDB | None" = None,
+    out: TextIO | None = None,
+) -> int:
+    parser = TranscriptParser()
+    with _session(db, out) as d:
+        if transcript:
+            transcripts = [(Path(transcript), Path(transcript).parent.name)]
+        elif all_:
+            transcripts = find_transcripts()
+        else:
+            result = find_current_session()
+            if result is None:
+                print("No transcript found for current session")
+                sys.exit(1)
+            transcripts = [result]
+
+        captured = 0
+        skipped = 0
+        for path, project in transcripts:
+            session_id = path.stem
+            if d.is_captured(session_id):
+                skipped += 1
+                continue
+
+            session = parser.parse_file(path, project, extract_facts=extract_facts)
+            if session is None:
+                skipped += 1
+                continue
+
+            d.save_session(session)
+            captured += 1
+            if not all_:
+                print(
+                    f"Captured: {session_id[:8]}  msgs={session.message_count}  tools={session.tool_count}  facts={len(session.facts)}  files={len(session.files)}  topic={session.topic or '-'}"
+                )
+
+        if all_:
+            print(f"Captured {captured} sessions, skipped {skipped} (already captured or trivial)")
+        elif captured == 0 and skipped > 0:
+            print("Session already captured")
     return 0

@@ -474,10 +474,11 @@ def test_session_start_surfaces_schema_downgrade_error(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    def raising_run(ns, out=None, db=None):
+    def raising_call(*args, **kwargs):
         raise RuntimeError("memory.db schema version 99 is newer than this engram build supports")
 
-    monkeypatch.setattr(mod.memcapture, "run", raising_run)
+    monkeypatch.setattr(mod.memcapture, "inject", raising_call)
+    monkeypatch.setattr(mod.memcapture, "banner", raising_call)
 
     payload = _json.dumps({"cwd": str(tmp_path / "proj"), "session_id": "t"})
     monkeypatch.setattr("sys.stdin", _io.StringIO(payload))
