@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mempatterns — Detect emergent patterns from memory.db and maintain an Obsidian wiki."""
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.12"
 # dependencies = []
 # ///
 

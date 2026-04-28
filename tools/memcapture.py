@@ -14,7 +14,7 @@ Usage:
     uv run ~/.claude/tools/memcapture.py --inject           # output context for SessionStart (~200 tokens)
 """
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.12"
 # dependencies = []
 # ///
 

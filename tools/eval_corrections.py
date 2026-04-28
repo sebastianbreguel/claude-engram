@@ -6,7 +6,7 @@ Usage:
     uv run tools/eval_corrections.py score  [--in eval/corrections_sample.md]
 """
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.12"
 # dependencies = []
 # ///
 
