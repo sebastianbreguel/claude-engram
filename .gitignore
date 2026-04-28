@@ -5,3 +5,6 @@ __pycache__/
 compiled-knowledge/
 .claude/
 *.log
+.serena/
+.context/
+skills/usage/
