@@ -377,9 +377,9 @@ Rules:
 def _run_claude(prompt: str, chunk: str, timeout: int = 120) -> str:
     """Invoke `claude --print` with a prompt + stdin chunk. Helper for in-process LLM calls.
 
-    Distinct from the `_run_llm` argparse handler below — they share a name in
-    earlier revisions, shadowing this helper and breaking every executive /
-    digest rebuild. Keep this named `_run_claude` to preserve the helper path.
+    Distinct from `_run_llm` below — earlier revisions named both `_run_llm`,
+    shadowing this helper and breaking every executive / digest rebuild. Keep
+    this named `_run_claude` to preserve the helper path.
     """
     if os.environ.get("ENGRAM_SKIP_LLM") == "1":
         return ""
@@ -499,14 +499,8 @@ def _on_precompact(_args: argparse.Namespace) -> int:
     # Sync chain so the post-compact SessionStart sees a fresh executive:
     # digest writes a new recap, executive rebuild reads it. ENGRAM_SKIP_LLM=1
     # short-circuits both LLM calls (tests + offline).
-    digest_args = argparse.Namespace(
-        mode="digest",
-        transcript=str(transcript),
-        session_id=session_id,
-        project=project,
-    )
     try:
-        _run_llm(digest_args)
+        _run_llm(mode="digest", transcript=str(transcript), session_id=session_id, project=project)
     except Exception as e:
         _log_warning(f"precompact: sync digest failed: {e}")
 
@@ -633,20 +627,20 @@ def _git_state(cwd: str, timeout: int = 2) -> dict:
     return out
 
 
-def _run_llm(args: argparse.Namespace) -> int:
-    cfg = _LLM_MODES.get(args.mode)
+def _run_llm(*, mode: str, transcript: str, session_id: str, project: str) -> int:
+    cfg = _LLM_MODES.get(mode)
     if cfg is None:
         return 1
-    transcript = Path(args.transcript)
-    chunk = _extract_chunk(transcript, tail_lines=cfg["tail_lines"], max_chars=cfg["max_chars"])
+    transcript_path = Path(transcript)
+    chunk = _extract_chunk(transcript_path, tail_lines=cfg["tail_lines"], max_chars=cfg["max_chars"])
     if len(chunk) < 50:
         return 0
     # Snapshot mode: prepend deterministic context (git state + last error)
     # so the LLM's summary can reference recent commits / failures without
     # needing a prompt rewrite or schema change.
-    if args.mode == "snapshot":
-        git = _git_state(_cwd_from_transcript(transcript))
-        last_error = memdoctor.last_error_summary(transcript)
+    if mode == "snapshot":
+        git = _git_state(_cwd_from_transcript(transcript_path))
+        last_error = memdoctor.last_error_summary(transcript_path)
         if git["branch"] or git["dirty_files"] or git["recent_commits"] or last_error:
             lines = ["# Git state"]
             if git["branch"] or git["dirty_files"]:
@@ -664,8 +658,8 @@ def _run_llm(args: argparse.Namespace) -> int:
     import memcapture
 
     if cfg["ingest"] == "ingest_digest":
-        return memcapture.ingest_digest(args.session_id, args.project, output)
-    return memcapture.ingest_snapshot(args.session_id, args.project, output)
+        return memcapture.ingest_digest(session_id, project, output)
+    return memcapture.ingest_snapshot(session_id, project, output)
 
 
 def _build_executive(*, cwd: str, project_key: str) -> int:
@@ -1206,7 +1200,7 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--transcript", required=True)
     rl.add_argument("--session-id", dest="session_id", required=True)
     rl.add_argument("--project", required=True)
-    rl.set_defaults(func=_run_llm)
+    rl.set_defaults(func=lambda a: _run_llm(mode=a.mode, transcript=a.transcript, session_id=a.session_id, project=a.project))
 
     ex = sub.add_parser("_executive", help="(internal) build executive summary cache for a cwd")
     ex.add_argument("--cwd", required=True)

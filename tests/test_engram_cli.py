@@ -5,7 +5,6 @@ from __future__ import annotations
 import json as _json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 REPO = Path(__file__).parent.parent
 ENGRAM = REPO / "tools" / "engram.py"
@@ -382,8 +381,7 @@ def test_run_llm_snapshot_header_includes_commits_and_last_error(tmp_path, monke
 
     monkeypatch.setattr(mod, "_run_claude", fake_run_claude)
 
-    args = SimpleNamespace(mode="snapshot", transcript=str(transcript), session_id="sid", project="proj")
-    rc = mod._run_llm(args)
+    rc = mod._run_llm(mode="snapshot", transcript=str(transcript), session_id="sid", project="proj")
     assert rc == 0  # _run_claude returned empty → early exit; the header was already built
     chunk = captured["chunk"]
     assert "recent_commits:" in chunk
@@ -425,8 +423,7 @@ def test_run_llm_snapshot_header_omitted_when_empty(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mod, "_run_claude", fake_run_claude)
 
-    args = SimpleNamespace(mode="snapshot", transcript=str(transcript), session_id="sid", project="proj")
-    mod._run_llm(args)
+    mod._run_llm(mode="snapshot", transcript=str(transcript), session_id="sid", project="proj")
     chunk = captured.get("chunk", "")
     assert "# Git state" not in chunk
     assert "recent_commits:" not in chunk
@@ -449,10 +446,11 @@ def test_git_state_handles_non_repo(tmp_path):
 
 def test_run_llm_helper_and_handler_are_distinct_names():
     """Guard against the name collision between the `_run_claude` helper and
-    the `_run_llm` argparse handler. Before the fix, two module-level defs
-    named `_run_llm` shadowed each other and broke every executive rebuild.
+    the `_run_llm` function. Before the fix, two module-level defs named
+    `_run_llm` shadowed each other and broke every executive rebuild.
     """
     import importlib.util
+    from inspect import signature
 
     spec = importlib.util.spec_from_file_location("engram_mod", ENGRAM)
     mod = importlib.util.module_from_spec(spec)
@@ -460,7 +458,9 @@ def test_run_llm_helper_and_handler_are_distinct_names():
 
     assert hasattr(mod, "_run_claude"), "helper must exist under a non-colliding name"
     assert mod._run_claude.__code__.co_argcount >= 2, "_run_claude takes (prompt, chunk, ...)"
-    assert mod._run_llm.__code__.co_argcount == 1, "_run_llm handler takes (args,) only"
+    # _run_llm takes explicit kwargs (no argparse.Namespace fakery).
+    params = signature(mod._run_llm).parameters
+    assert set(params) == {"mode", "transcript", "session_id", "project"}
 
 
 def test_exec_prompt_includes_signals_slot():
