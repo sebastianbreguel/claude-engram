@@ -15,7 +15,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
 
-from memcapture import MemoryDB, _tokenize_query  # noqa: E402
+from memcapture import MemoryDB, _build_query_score, _tokenize_query  # noqa: E402
 
 
 def test_tokenize_drops_stopwords_short_and_dedupes():
@@ -38,6 +38,31 @@ def test_tokenize_none_or_empty_returns_empty():
     assert _tokenize_query(None) == []
     assert _tokenize_query("") == []
     assert _tokenize_query("   ") == []
+
+
+def test_build_query_score_returns_zero_for_empty_query():
+    expr, params = _build_query_score(None)
+    assert expr == "0"
+    assert params == []
+
+
+def test_build_query_score_expands_n_tokens_times_5_params():
+    """One CASE block per token; each block consumes 5 LIKE patterns (one per
+    weighted column). Three tokens → expr summed 3 times, params length 15."""
+    expr, params = _build_query_score("auth bug timeout")
+    assert expr.count("CASE WHEN m.topic LIKE ?") == 3
+    assert len(params) == 15
+    assert params[0] == "%auth%"
+    assert params[5] == "%bug%"
+    assert params[10] == "%timeout%"
+
+
+def test_build_query_score_honors_engram_rerank_off(monkeypatch):
+    """ENGRAM_RERANK=off short-circuits to ('0', []) regardless of query."""
+    monkeypatch.setenv("ENGRAM_RERANK", "off")
+    expr, params = _build_query_score("auth bug timeout")
+    assert expr == "0"
+    assert params == []
 
 
 @pytest.fixture

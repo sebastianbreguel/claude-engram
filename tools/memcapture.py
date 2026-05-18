@@ -72,6 +72,42 @@ def _tokenize_query(q: str | None, max_tokens: int = 5) -> list[str]:
     return out
 
 
+def _build_query_score(query: str | None) -> tuple[str, list[str]]:
+    """Build the (SQL fragment, parameter list) for query-aware reranking.
+
+    Returns ``("0", [])`` when there are no usable tokens. Otherwise returns a
+    sum of per-token CASE expressions that match the query against five
+    nullable columns of the ``memories`` table — topic/content with weights
+    5/3, and why/where_ctx/learned with weight 2 each (COALESCEd so NULL
+    doesn't break LIKE).
+
+    Co-locates tokenization with LIKE expansion: callers no longer wire
+    ``_tokenize_query`` + the N×5 parameter expansion by hand. The
+    ``ENGRAM_RERANK=off`` A/B counterfactual short-circuits to ``("0", [])``
+    here too, so the call site doesn't need to know about the env flag.
+    """
+    if os.environ.get("ENGRAM_RERANK", "").lower() == "off":
+        return "0", []
+    tokens = _tokenize_query(query)
+    if not tokens:
+        return "0", []
+    # Per token: topic(5) + content(3) + why/where_ctx/learned(2 each).
+    # COALESCE on nullable columns so NULL doesn't break LIKE.
+    per_token_sql = (
+        "(CASE WHEN m.topic LIKE ? ESCAPE '\\' THEN 5 ELSE 0 END"
+        " + CASE WHEN m.content LIKE ? ESCAPE '\\' THEN 3 ELSE 0 END"
+        " + CASE WHEN COALESCE(m.why, '') LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END"
+        " + CASE WHEN COALESCE(m.where_ctx, '') LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END"
+        " + CASE WHEN COALESCE(m.learned, '') LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END)"
+    )
+    qscore_expr = " + ".join([per_token_sql] * len(tokens))
+    qscore_params: list[str] = []
+    for t in tokens:
+        pat = f"%{_like_escape(t)}%"
+        qscore_params.extend([pat] * 5)
+    return qscore_expr, qscore_params
+
+
 # --- Heuristic patterns ---
 
 DECISION_PATTERNS = [
@@ -610,30 +646,7 @@ class MemoryDB:
         if cutoff_ts is None:
             self._cleanup_ephemeral_daily()
 
-        # A/B counterfactual: ENGRAM_RERANK=off disables query-aware rerank.
-        # Used by eval_warmstart to measure whether U4 rerank moves the needle.
-        if os.environ.get("ENGRAM_RERANK", "").lower() == "off":
-            query = None
-
-        tokens = _tokenize_query(query)
-        if tokens:
-            # Per token: topic(5) + content(3) + why/where_ctx/learned(2 each).
-            # COALESCE on nullable columns so NULL doesn't break LIKE.
-            per_token_sql = (
-                "(CASE WHEN m.topic LIKE ? ESCAPE '\\' THEN 5 ELSE 0 END"
-                " + CASE WHEN m.content LIKE ? ESCAPE '\\' THEN 3 ELSE 0 END"
-                " + CASE WHEN COALESCE(m.why, '') LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END"
-                " + CASE WHEN COALESCE(m.where_ctx, '') LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END"
-                " + CASE WHEN COALESCE(m.learned, '') LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END)"
-            )
-            qscore_expr = " + ".join([per_token_sql] * len(tokens))
-            qscore_params: list[str] = []
-            for t in tokens:
-                pat = f"%{_like_escape(t)}%"
-                qscore_params.extend([pat] * 5)
-        else:
-            qscore_expr = "0"
-            qscore_params = []
+        qscore_expr, qscore_params = _build_query_score(query)
 
         cutoff_clause = " AND m.created_at < ?" if cutoff_ts else ""
         cutoff_params: list[str] = [cutoff_ts] if cutoff_ts else []
