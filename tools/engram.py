@@ -646,9 +646,7 @@ def _run_llm(args: argparse.Namespace) -> int:
     # needing a prompt rewrite or schema change.
     if args.mode == "snapshot":
         git = _git_state(_cwd_from_transcript(transcript))
-        events = memdoctor.parse_jsonl(transcript)
-        last_error_raw = memdoctor.extract_error_context(events) if events else None
-        last_error = memdoctor.normalize_error(last_error_raw) if last_error_raw else None
+        last_error = memdoctor.last_error_summary(transcript)
         if git["branch"] or git["dirty_files"] or git["recent_commits"] or last_error:
             lines = ["# Git state"]
             if git["branch"] or git["dirty_files"]:

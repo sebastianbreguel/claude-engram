@@ -21,6 +21,7 @@ from memdoctor import (
     enrich_from_memory,
     extract_error_context,
     format_rules,
+    last_error_summary,
     normalize_error,
     parse_jsonl,
     signals_for_executive,
@@ -172,6 +173,20 @@ class TestNormalizeError:
 
     def test_caps_at_200_chars(self):
         assert len(normalize_error("x" * 500)) == 200
+
+
+class TestLastErrorSummary:
+    def test_returns_normalized_last_error_from_transcript(self):
+        out = last_error_summary(FIXTURES / "error-loop-session.jsonl")
+        assert out is not None
+        assert "<path>" not in out or "/Users/" not in out  # paths normalized if present
+        assert len(out) <= 200
+
+    def test_returns_none_for_happy_session(self):
+        assert last_error_summary(FIXTURES / "happy-session.jsonl") is None
+
+    def test_returns_none_for_missing_file(self, tmp_path):
+        assert last_error_summary(tmp_path / "does-not-exist.jsonl") is None
 
 
 class TestEnrichFromMemory:

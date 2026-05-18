@@ -421,6 +421,23 @@ def normalize_error(text: str) -> str:
     return first[:200]
 
 
+def last_error_summary(transcript_path: Path) -> str | None:
+    """Normalized text of the last failing tool_result in a transcript, or None.
+
+    Convenience pipeline over parse_jsonl + extract_error_context + normalize_error,
+    so callers that just want "the last error in compact form" express that intent
+    in one call instead of wiring three primitives. The primitives stay public for
+    tests and advanced consumers.
+    """
+    events = parse_jsonl(transcript_path)
+    if not events:
+        return None
+    raw = extract_error_context(events)
+    if not raw:
+        return None
+    return normalize_error(raw)
+
+
 def enrich_from_memory(error_text: str, db_path: Path = MEMORY_DB) -> dict | None:
     """Look up prior occurrences of an error in memory.db facts table. Returns None if DB missing or no match."""
     if not db_path.exists():
