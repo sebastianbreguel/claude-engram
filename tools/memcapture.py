@@ -653,40 +653,31 @@ class MemoryDB:
 
         # LIMIT 100 is far above the char_budget can render (~20 rows at 70 chars).
         # Keeps the query bounded as memories grow.
-        if project:
-            # Durable memories (preferences) stay global — general guidance applies everywhere.
-            # Ephemeral memories (current context) are prioritized by project match.
-            rows = self.conn.execute(
-                f"""
-                SELECT m.topic, m.content, m.durability, m.last_accessed,
-                       CASE
-                         WHEN m.durability = 'durable' THEN 1
-                         WHEN s.project LIKE ? ESCAPE '\\' THEN 1
-                         ELSE 0
-                       END AS keep_priority,
-                       exp_decay(julianday('now') - julianday(m.last_accessed), ?)
-                       + MIN(CAST(m.exposure_count AS REAL) / ?, 1.0) AS score,
-                       {qscore_expr} AS query_score
-                FROM memories m
-                LEFT JOIN sessions s ON m.source_session = s.session_id
-                WHERE m.superseded_by IS NULL{cutoff_clause}
-                ORDER BY query_score DESC, keep_priority DESC, score DESC
-                LIMIT 100
-                """,
-                (f"%{_like_escape(project)}%", DECAY_HALF_LIFE_DAYS, REINFORCEMENT_SATURATE, *qscore_params, *cutoff_params),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                f"""SELECT m.topic, m.content, m.durability, m.last_accessed,
-                       exp_decay(julianday('now') - julianday(m.last_accessed), ?)
-                       + MIN(CAST(m.exposure_count AS REAL) / ?, 1.0) AS score,
-                       {qscore_expr} AS query_score
-                FROM memories m
-                WHERE m.superseded_by IS NULL{cutoff_clause}
-                ORDER BY query_score DESC, score DESC
-                LIMIT 100""",
-                (DECAY_HALF_LIFE_DAYS, REINFORCEMENT_SATURATE, *qscore_params, *cutoff_params),
-            ).fetchall()
+        # When project is set: durable memories (preferences) stay global; ephemeral
+        # memories (current context) are prioritized by project match via keep_priority.
+        # When project is None: CASE short-circuits keep_priority=1 for all rows, so
+        # ORDER BY collapses to (query_score, score).
+        project_pattern = f"%{_like_escape(project)}%" if project else None
+        rows = self.conn.execute(
+            f"""
+            SELECT m.topic, m.content, m.durability, m.last_accessed,
+                   CASE
+                     WHEN ? IS NULL THEN 1
+                     WHEN m.durability = 'durable' THEN 1
+                     WHEN s.project LIKE ? ESCAPE '\\' THEN 1
+                     ELSE 0
+                   END AS keep_priority,
+                   exp_decay(julianday('now') - julianday(m.last_accessed), ?)
+                   + MIN(CAST(m.exposure_count AS REAL) / ?, 1.0) AS score,
+                   {qscore_expr} AS query_score
+            FROM memories m
+            LEFT JOIN sessions s ON m.source_session = s.session_id
+            WHERE m.superseded_by IS NULL{cutoff_clause}
+            ORDER BY query_score DESC, keep_priority DESC, score DESC
+            LIMIT 100
+            """,
+            (project_pattern, project_pattern, DECAY_HALF_LIFE_DAYS, REINFORCEMENT_SATURATE, *qscore_params, *cutoff_params),
+        ).fetchall()
 
         if not rows:
             output = self._fallback_inject(project, cutoff_ts=cutoff_ts)
