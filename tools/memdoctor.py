@@ -777,19 +777,6 @@ def signals_for_executive(project_filter: str, top_n: int = 3) -> str:
     return "\n".join(f"- {s} ({c}x)" for s, c in ranked)
 
 
-def signals_banner_line(project_filter: str, top_n: int = 2) -> str:
-    """One-liner for the SessionStart banner. Empty if nothing fires.
-
-    Format: `friction: error-loop(3x), correction-heavy(5x) (run: engram doctor)`
-    Kept short so it fits beside the stats line without wrapping.
-    """
-    ranked = _ranked_signals(project_filter)[:top_n]
-    if not ranked:
-        return ""
-    parts = ", ".join(f"{s}({c}x)" for s, c in ranked)
-    return f"friction: {parts} (run: engram doctor)"
-
-
 def _extract_corrections(events: list[dict]) -> list[str]:
     """User messages that matched a CORRECTION_PATTERN, in order, deduplicated by text."""
     seen: set[str] = set()

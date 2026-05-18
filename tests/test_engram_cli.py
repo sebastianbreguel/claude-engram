@@ -659,7 +659,11 @@ def test_preview_prev_reports_missing_cleanly(tmp_path, monkeypatch):
 def test_session_start_banner_omits_friction(tmp_path, monkeypatch):
     """Friction line was pulled from the auto-banner pre-launch — surface is too
     intrusive for an ambient tool. `engram doctor` remains opt-in CLI. Even if
-    memdoctor reports signals, the systemMessage must NOT contain them."""
+    memdoctor reports signals, the systemMessage must NOT contain them.
+
+    Regression trap: monkeypatch the surviving friction-rendering function
+    (`signals_for_executive`) to return content with the `friction:` marker.
+    If anyone wires it into `build_banner` in the future, the assertion fails."""
     import importlib.util
 
     fake_home = tmp_path / "home"
@@ -670,8 +674,11 @@ def test_session_start_banner_omits_friction(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    # Even with a non-empty signal report, banner should not surface it.
-    monkeypatch.setattr(mod.memdoctor, "signals_banner_line", lambda cwd, top_n=2: "friction: error-loop(3x) (run: engram doctor)")
+    monkeypatch.setattr(
+        mod.memdoctor,
+        "signals_for_executive",
+        lambda cwd, top_n=3: "friction: error-loop (3x)",
+    )
 
     import io as _io
 
