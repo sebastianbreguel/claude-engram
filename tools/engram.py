@@ -799,11 +799,6 @@ def _seed_executive(*, cwd: str) -> int:
     return 0
 
 
-def _on_seed_executive(args: argparse.Namespace) -> int:
-    """Argparse wrapper around _seed_executive."""
-    return _seed_executive(cwd=args.cwd or "")
-
-
 def _log_tail(args: argparse.Namespace) -> int:
     """Print the last N lines of ~/.claude/engram.log (background LLM failures, timeouts)."""
     log = Path.home() / ".claude" / "engram.log"
@@ -1222,7 +1217,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sd = sub.add_parser("_seed", help="(internal) seed first-session executive from raw project signals")
     sd.add_argument("--cwd", required=True)
-    sd.set_defaults(func=_on_seed_executive)
+    sd.set_defaults(func=lambda a: _seed_executive(cwd=a.cwd or ""))
 
     pv = sub.add_parser("preview", help="preview SessionStart executive summary (for debug/demo)")
     pv.add_argument("--cwd", default=None)
