@@ -743,13 +743,6 @@ def _publish_executive(cwd: str, output: str, *, label: str = "executive") -> No
         _log_warning(f"{label}: cache write failed: {e}")
 
 
-def _on_executive(args: argparse.Namespace) -> int:
-    """Argparse-dispatched wrapper around _build_executive. Kept so direct
-    test callers (and the `engram _executive` subcommand) can pass a Namespace
-    while internal call sites use the kwarg-pure body."""
-    return _build_executive(cwd=args.cwd or "", project_key=args.project_key or "")
-
-
 def _seed_executive(*, cwd: str) -> int:
     """First-session seed: synthesize 3-bullet executive from raw project signals
     (CLAUDE.md head + git log + top-level dir) when no executive cache exists yet.
@@ -807,7 +800,7 @@ def _seed_executive(*, cwd: str) -> int:
 
 
 def _on_seed_executive(args: argparse.Namespace) -> int:
-    """Argparse wrapper around _seed_executive (mirrors _on_executive)."""
+    """Argparse wrapper around _seed_executive."""
     return _seed_executive(cwd=args.cwd or "")
 
 
@@ -1225,7 +1218,7 @@ def build_parser() -> argparse.ArgumentParser:
     ex = sub.add_parser("_executive", help="(internal) build executive summary cache for a cwd")
     ex.add_argument("--cwd", required=True)
     ex.add_argument("--project-key", dest="project_key", default="")
-    ex.set_defaults(func=_on_executive)
+    ex.set_defaults(func=lambda a: _build_executive(cwd=a.cwd or "", project_key=a.project_key or ""))
 
     sd = sub.add_parser("_seed", help="(internal) seed first-session executive from raw project signals")
     sd.add_argument("--cwd", required=True)

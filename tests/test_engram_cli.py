@@ -475,7 +475,7 @@ def test_exec_prompt_includes_signals_slot():
 
 
 def test_executive_cache_rotates_to_prev(tmp_path, monkeypatch):
-    """_on_executive rotates <slug>.md → <slug>.md.prev before overwriting."""
+    """_build_executive rotates <slug>.md → <slug>.md.prev before overwriting."""
     import importlib.util
 
     fake_home = tmp_path / "home"
@@ -486,7 +486,7 @@ def test_executive_cache_rotates_to_prev(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    # Seed a cache file by hand, then invoke _on_executive with SKIP_LLM=1 so
+    # Seed a cache file by hand, then invoke _build_executive with SKIP_LLM=1 so
     # it would normally no-op. We need a cache write to happen, so patch
     # _run_claude to return a canned string.
     cwd = str(tmp_path / "proj")
@@ -500,7 +500,7 @@ def test_executive_cache_rotates_to_prev(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_latest_recap", lambda c, max_files=20: "fake recap")
 
     ns = __import__("argparse").Namespace(cwd=cwd, project_key=cwd.replace("/", "-"))
-    assert mod._on_executive(ns) == 0
+    assert mod._build_executive(cwd=ns.cwd, project_key=ns.project_key) == 0
     assert cache.read_text().strip() == "NEW SUMMARY"
     prev = cache.with_suffix(cache.suffix + ".prev")
     assert prev.exists()
@@ -545,8 +545,8 @@ def test_executive_cache_survives_tmp_write_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "write_text", failing_write_text)
 
     ns = __import__("argparse").Namespace(cwd=cwd, project_key=cwd.replace("/", "-"))
-    # _on_executive swallows write errors via _log_warning; return is still 0.
-    assert mod._on_executive(ns) == 0
+    # _build_executive swallows write errors via _log_warning; return is still 0.
+    assert mod._build_executive(cwd=ns.cwd, project_key=ns.project_key) == 0
     # Cache and .prev must be untouched, no per-pid tmp files must linger.
     assert cache.read_text().strip() == "OLD SUMMARY"
     assert prev.read_text().strip() == "OLDER SUMMARY"
@@ -589,7 +589,7 @@ def test_executive_cache_tmp_includes_pid(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "write_text", capturing_write_text)
 
     ns = __import__("argparse").Namespace(cwd=cwd, project_key=cwd.replace("/", "-"))
-    assert mod._on_executive(ns) == 0
+    assert mod._build_executive(cwd=ns.cwd, project_key=ns.project_key) == 0
     assert captured_tmp_paths, "expected at least one .tmp write"
     assert f".{_os.getpid()}.tmp" in captured_tmp_paths[0]
 
