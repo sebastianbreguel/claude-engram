@@ -912,6 +912,119 @@ def _forget(args: argparse.Namespace) -> int:
     return 0
 
 
+def _reset(args: argparse.Namespace) -> int:
+    """Wipe engram + Claude Code auto-memory state scoped to a single cwd.
+
+    Targets (all cwd-scoped — other projects' data is never touched):
+      - memory.db: sessions/memories/facts for this cwd; facts_fts + compactions
+        for this cwd's project key(s)
+      - executive cache: <slug>.md and <slug>.md.prev under EXECUTIVE_DIR
+      - Claude Code auto-memory: ~/.claude/projects/<cc-slug>/memory/*.md
+
+    Engram strips leading dashes from the slug; Claude Code keeps them, so
+    each path is computed separately. All DB deletes run in one transaction.
+    """
+    cwd_raw = args.cwd or os.getcwd()
+    cwd = str(Path(cwd_raw).resolve())
+
+    engram_slug = cwd.replace("/", "-").strip("-") or "default"
+    cc_slug = cwd.replace("/", "-") or "default"
+    # sessions.project == cwd.replace("/", "-"); sessions.cwd is currently never
+    # populated by memcapture, so match by project as the primary key and keep
+    # cwd as a defensive fallback for any future row that does set it.
+    project_key = cc_slug
+
+    db = memcapture.MemoryDB()
+    session_rows = db.conn.execute(
+        "SELECT session_id, project FROM sessions WHERE project = ? OR cwd = ?",
+        (project_key, cwd),
+    ).fetchall()
+    session_ids = [r["session_id"] for r in session_rows]
+    project_keys = sorted({r["project"] for r in session_rows if r["project"]} | {project_key})
+
+    if session_ids:
+        sph = ",".join("?" * len(session_ids))
+        n_memories = db.conn.execute(f"SELECT COUNT(*) FROM memories WHERE source_session IN ({sph})", session_ids).fetchone()[0]
+        n_facts = db.conn.execute(f"SELECT COUNT(*) FROM facts WHERE session_id IN ({sph})", session_ids).fetchone()[0]
+    else:
+        n_memories = n_facts = 0
+
+    if project_keys:
+        pph = ",".join("?" * len(project_keys))
+        n_fts = db.conn.execute(f"SELECT COUNT(*) FROM facts_fts WHERE project IN ({pph})", project_keys).fetchone()[0]
+        n_compactions = db.conn.execute(f"SELECT COUNT(*) FROM compactions WHERE project IN ({pph})", project_keys).fetchone()[0]
+    else:
+        n_fts = n_compactions = 0
+
+    exec_md = EXECUTIVE_DIR / f"{engram_slug}.md"
+    exec_prev = EXECUTIVE_DIR / f"{engram_slug}.md.prev"
+    exec_targets = [p for p in (exec_md, exec_prev) if p.exists()]
+
+    auto_dir = Path.home() / ".claude" / "projects" / cc_slug / "memory"
+    auto_files = sorted(auto_dir.glob("*.md")) if auto_dir.exists() else []
+
+    print(f"Reset scope: {cwd}")
+    print(
+        f"  memory.db: {len(session_ids)} session(s), {n_memories} memory(ies), "
+        f"{n_facts} fact(s), {n_fts} FTS row(s), {n_compactions} compaction(s)"
+    )
+    if exec_targets:
+        print(f"  executive cache: {', '.join(p.name for p in exec_targets)}")
+    else:
+        print("  executive cache: (none)")
+    print(f"  CC auto-memory: {len(auto_files)} file(s) under {auto_dir}")
+    for f in auto_files[:8]:
+        print(f"    {f.name}")
+    if len(auto_files) > 8:
+        print(f"    ... and {len(auto_files) - 8} more")
+
+    total = len(session_ids) + len(exec_targets) + len(auto_files) + n_compactions + n_fts
+    if total == 0:
+        print("\nNothing to reset.")
+        return 0
+
+    if args.dry_run:
+        print("\n(dry-run) no changes made")
+        return 0
+
+    if not args.yes:
+        try:
+            answer = input("\nProceed with reset? [y/N]: ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return 1
+
+    with db.conn:
+        if session_ids:
+            sph = ",".join("?" * len(session_ids))
+            db.conn.execute(f"DELETE FROM memories WHERE source_session IN ({sph})", session_ids)
+            db.conn.execute(f"DELETE FROM facts WHERE session_id IN ({sph})", session_ids)
+            db.conn.execute(f"DELETE FROM sessions WHERE session_id IN ({sph})", session_ids)
+        if project_keys:
+            pph = ",".join("?" * len(project_keys))
+            db.conn.execute(f"DELETE FROM facts_fts WHERE project IN ({pph})", project_keys)
+            db.conn.execute(f"DELETE FROM compactions WHERE project IN ({pph})", project_keys)
+
+    for p in exec_targets:
+        try:
+            p.unlink()
+        except OSError as e:
+            print(f"warn: could not remove {p}: {e}", file=sys.stderr)
+
+    for f in auto_files:
+        try:
+            f.unlink()
+        except OSError as e:
+            print(f"warn: could not remove {f}: {e}", file=sys.stderr)
+
+    print(f"\nReset complete for {cwd}.")
+    print("Note: Claude Code's auto-memory regenerates files on next session;")
+    print("      executive summary rebuilds on next SessionStart.")
+    return 0
+
+
 def _verify_install(_args: argparse.Namespace) -> int:
     """Compare SHA256 of repo tools/*.py with installed ~/.claude/tools/*.py.
 
@@ -1155,6 +1268,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fg.add_argument("--dry-run", dest="dry_run", action="store_true", help="print what would be deleted, don't delete")
     fg.set_defaults(func=_forget)
+
+    rs = sub.add_parser(
+        "reset",
+        help="wipe all engram + Claude Code auto-memory state for a single cwd (default: current)",
+    )
+    rs.add_argument("--cwd", default=None, help="cwd path to reset (default: current working directory)")
+    rs.add_argument("--yes", "-y", action="store_true", help="skip confirmation prompt")
+    rs.add_argument("--dry-run", dest="dry_run", action="store_true", help="preview what would be deleted")
+    rs.set_defaults(func=_reset)
 
     sr = sub.add_parser("search", help="FTS5 search over captured facts")
     sr.add_argument("query", help="search term (FTS5 syntax supported)")

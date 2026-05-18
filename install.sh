@@ -21,6 +21,7 @@ fi
 echo "[1/4] Creating directories..."
 mkdir -p "$CLAUDE_DIR/tools"
 mkdir -p "$CLAUDE_DIR/skills/reflect"
+mkdir -p "$CLAUDE_DIR/commands"
 
 echo "[2/4] Installing files..."
 
@@ -39,6 +40,14 @@ rm -rf "$CLAUDE_DIR/skills/usage"
 
 cp "$SCRIPT_DIR/skills/reflect/SKILL.md" "$CLAUDE_DIR/skills/reflect/SKILL.md"
 echo "  -> skills/reflect/SKILL.md (memory consolidation + rule proposals)"
+
+if [ -d "$SCRIPT_DIR/commands" ]; then
+    for cmd in "$SCRIPT_DIR/commands"/*.md; do
+        [ -e "$cmd" ] || continue
+        cp "$cmd" "$CLAUDE_DIR/commands/$(basename "$cmd")"
+        echo "  -> commands/$(basename "$cmd") (slash command)"
+    done
+fi
 
 echo "[3/4] Configuring hooks..."
 

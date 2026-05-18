@@ -1047,3 +1047,151 @@ def test_seed_executive_atomic_publish_rotates_prev(tmp_path, monkeypatch):
     prev = cache.with_suffix(cache.suffix + ".prev")
     assert prev.exists()
     assert prev.read_text().strip() == "STALE"
+
+
+def _seed_reset_fixture(fake_home: Path, cwd: str, project: str) -> dict:
+    """Seed memory.db rows (session + memory + fact + FTS + compaction) for a cwd,
+    plus executive cache files and Claude Code auto-memory files. Returns paths
+    for assertions."""
+    import importlib.util
+    import sqlite3
+
+    db_path = fake_home / ".claude" / "memory.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    spec = importlib.util.spec_from_file_location("memcap_mod", REPO / "tools" / "memcapture.py")
+    mc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mc)
+    mc.MemoryDB(db_path).conn.close()
+
+    sid = f"sess-{project}"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT OR REPLACE INTO sessions (session_id, project, cwd, captured_at) VALUES (?, ?, ?, datetime('now'))",
+        (sid, project, cwd),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO memories (topic, content, durability, created_at, last_accessed, source_session) "
+        "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?)",
+        (f"topic-{project}", f"content-{project}", "ephemeral", sid),
+    )
+    import hashlib
+
+    fact_content = f"fact-{project}"
+    fact_hash = hashlib.sha256(fact_content.encode()).hexdigest()
+    conn.execute(
+        "INSERT INTO facts (session_id, type, content, content_hash) VALUES (?, ?, ?, ?)",
+        (sid, "decision", fact_content, fact_hash),
+    )
+    conn.execute(
+        "INSERT INTO facts_fts (content, type, project) VALUES (?, ?, ?)",
+        (fact_content, "decision", project),
+    )
+    conn.execute("INSERT INTO compactions (project) VALUES (?)", (project,))
+    conn.commit()
+    conn.close()
+
+    engram_slug = cwd.replace("/", "-").strip("-") or "default"
+    cc_slug = cwd.replace("/", "-") or "default"
+    exec_md = fake_home / ".claude" / "engram" / "executive" / f"{engram_slug}.md"
+    exec_md.parent.mkdir(parents=True, exist_ok=True)
+    exec_md.write_text("exec body\n")
+    exec_prev = exec_md.with_suffix(exec_md.suffix + ".prev")
+    exec_prev.write_text("prev body\n")
+
+    auto_dir = fake_home / ".claude" / "projects" / cc_slug / "memory"
+    auto_dir.mkdir(parents=True, exist_ok=True)
+    (auto_dir / "MEMORY.md").write_text("- index\n")
+    (auto_dir / "topic_one.md").write_text("body\n")
+
+    return {
+        "db_path": db_path,
+        "session_id": sid,
+        "project": project,
+        "exec_md": exec_md,
+        "exec_prev": exec_prev,
+        "auto_dir": auto_dir,
+    }
+
+
+def test_reset_listed_in_help():
+    result = _run(["--help"])
+    assert result.returncode == 0
+    assert "reset" in result.stdout
+
+
+def test_reset_dry_run_keeps_all_state(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(fake_home))
+    cwd = str((tmp_path / "proj-a").resolve())
+    (tmp_path / "proj-a").mkdir()
+    fx = _seed_reset_fixture(fake_home, cwd=cwd, project=cwd.replace("/", "-"))
+
+    result = _run(["reset", "--cwd", cwd, "--dry-run"])
+    assert result.returncode == 0, result.stderr
+    assert "(dry-run)" in result.stdout
+    assert cwd in result.stdout
+
+    import sqlite3
+
+    conn = sqlite3.connect(str(fx["db_path"]))
+    assert conn.execute("SELECT COUNT(*) FROM sessions WHERE cwd = ?", (cwd,)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE source_session = ?", (fx["session_id"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM facts WHERE session_id = ?", (fx["session_id"],)).fetchone()[0] == 1
+    conn.close()
+    assert fx["exec_md"].exists()
+    assert fx["exec_prev"].exists()
+    assert (fx["auto_dir"] / "MEMORY.md").exists()
+
+
+def test_reset_yes_wipes_target_cwd_and_spares_others(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    cwd_a = str((tmp_path / "proj-a").resolve())
+    cwd_b = str((tmp_path / "proj-b").resolve())
+    (tmp_path / "proj-a").mkdir()
+    (tmp_path / "proj-b").mkdir()
+    fx_a = _seed_reset_fixture(fake_home, cwd=cwd_a, project=cwd_a.replace("/", "-"))
+    fx_b = _seed_reset_fixture(fake_home, cwd=cwd_b, project=cwd_b.replace("/", "-"))
+
+    result = _run(["reset", "--cwd", cwd_a, "--yes"])
+    assert result.returncode == 0, result.stderr
+    assert "Reset complete" in result.stdout
+
+    import sqlite3
+
+    conn = sqlite3.connect(str(fx_a["db_path"]))
+    assert conn.execute("SELECT COUNT(*) FROM sessions WHERE cwd = ?", (cwd_a,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE source_session = ?", (fx_a["session_id"],)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM facts WHERE session_id = ?", (fx_a["session_id"],)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM facts_fts WHERE project = ?", (fx_a["project"],)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM compactions WHERE project = ?", (fx_a["project"],)).fetchone()[0] == 0
+
+    assert conn.execute("SELECT COUNT(*) FROM sessions WHERE cwd = ?", (cwd_b,)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE source_session = ?", (fx_b["session_id"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM facts WHERE session_id = ?", (fx_b["session_id"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM facts_fts WHERE project = ?", (fx_b["project"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM compactions WHERE project = ?", (fx_b["project"],)).fetchone()[0] == 1
+    conn.close()
+
+    assert not fx_a["exec_md"].exists()
+    assert not fx_a["exec_prev"].exists()
+    assert not (fx_a["auto_dir"] / "MEMORY.md").exists()
+    assert not (fx_a["auto_dir"] / "topic_one.md").exists()
+
+    assert fx_b["exec_md"].exists()
+    assert fx_b["exec_prev"].exists()
+    assert (fx_b["auto_dir"] / "MEMORY.md").exists()
+
+
+def test_reset_empty_cwd_reports_nothing_to_reset(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    empty_cwd = str((tmp_path / "empty").resolve())
+    (tmp_path / "empty").mkdir()
+
+    result = _run(["reset", "--cwd", empty_cwd, "--yes"])
+    assert result.returncode == 0, result.stderr
+    assert "Nothing to reset" in result.stdout
