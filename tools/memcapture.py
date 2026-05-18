@@ -1014,6 +1014,11 @@ class TranscriptParser:
             except json.JSONDecodeError:
                 continue
 
+            if session.cwd is None:
+                obj_cwd = obj.get("cwd")
+                if isinstance(obj_cwd, str) and obj_cwd:
+                    session.cwd = obj_cwd
+
             msg_type = obj.get("type", "")
 
             if msg_type == "user":
