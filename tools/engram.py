@@ -480,33 +480,42 @@ def _on_precompact(_args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"capture error: {e}", file=sys.stderr)
 
-    for mode in ("digest", "snapshot"):
-        _fire_and_forget(
-            [
-                sys.executable,
-                str(Path(__file__)),
-                "_run-llm",
-                "--mode",
-                mode,
-                "--transcript",
-                str(transcript),
-                "--session-id",
-                session_id,
-                f"--project={project}",
-            ]
-        )
+    # Snapshot stays async — executive rebuild does not read it.
+    _fire_and_forget(
+        [
+            sys.executable,
+            str(Path(__file__)),
+            "_run-llm",
+            "--mode",
+            "snapshot",
+            "--transcript",
+            str(transcript),
+            "--session-id",
+            session_id,
+            f"--project={project}",
+        ]
+    )
+
+    # Sync chain so the post-compact SessionStart sees a fresh executive:
+    # digest writes a new recap, executive rebuild reads it. ENGRAM_SKIP_LLM=1
+    # short-circuits both LLM calls (tests + offline).
+    digest_args = argparse.Namespace(
+        mode="digest",
+        transcript=str(transcript),
+        session_id=session_id,
+        project=project,
+    )
+    try:
+        _run_llm(digest_args)
+    except Exception as e:
+        _log_warning(f"precompact: sync digest failed: {e}")
 
     cwd = payload.get("cwd") or _cwd_from_transcript(transcript)
     if cwd:
-        _fire_and_forget(
-            [
-                sys.executable,
-                str(Path(__file__)),
-                "_executive",
-                f"--cwd={cwd}",
-                f"--project-key={cwd.replace('/', '-')}",
-            ]
-        )
+        try:
+            _build_executive(cwd=cwd, project_key=cwd.replace("/", "-"))
+        except Exception as e:
+            _log_warning(f"precompact: sync executive failed: {e}")
 
     _reset_counter()
     return 0
