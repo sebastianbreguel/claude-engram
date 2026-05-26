@@ -208,11 +208,12 @@ def _extract_chunk(transcript: Path, tail_lines: int = 800, max_chars: int = 600
 
     # Gaps underestimated — drop lowest-scoring kept turns until the render fits.
     drop_order = sorted(keep, key=_adjusted_score)
+    sorted_keep = sorted(keep)
     for i in drop_order:
-        if len(keep) <= 1:
+        if len(sorted_keep) <= 1:
             break
-        keep.discard(i)
-        rendered = _render(sorted(keep))
+        sorted_keep.remove(i)
+        rendered = _render(sorted_keep)
         if len(rendered) <= max_chars:
             return rendered
     return rendered
@@ -336,18 +337,24 @@ def _latest_recap(cwd: str, max_files: int = 20) -> str | None:
         )[:max_files]
     except Exception:
         return None
+    _TAIL_BYTES = 65_536  # away_summary is near EOF; read last 64 KB only
     for path in candidates:
         try:
-            with path.open(encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    try:
-                        obj = _json.loads(line)
-                    except Exception:
-                        continue
-                    if obj.get("type") == "system" and obj.get("subtype") == "away_summary" and obj.get("cwd") == cwd:
-                        content = obj.get("content", "")
-                        if isinstance(content, str) and content.strip():
-                            return content.removesuffix(" (disable recaps in /config)").strip()
+            size = path.stat().st_size
+            with path.open("rb") as fh:
+                fh.seek(max(0, size - _TAIL_BYTES))
+                if size > _TAIL_BYTES:
+                    fh.readline()  # discard partial first line after seek
+                raw = fh.read().decode("utf-8", errors="replace")
+            for line in raw.splitlines():
+                try:
+                    obj = _json.loads(line)
+                except Exception:
+                    continue
+                if obj.get("type") == "system" and obj.get("subtype") == "away_summary" and obj.get("cwd") == cwd:
+                    content = obj.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        return content.removesuffix(" (disable recaps in /config)").strip()
         except Exception:
             continue
     return None

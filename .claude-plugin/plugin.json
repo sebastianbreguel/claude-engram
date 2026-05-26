@@ -1,9 +1,12 @@
 {
   "name": "claude-engram",
+  "displayName": "Engram",
   "description": "Persistent memory for Claude Code: per-project handoff notes and learned preferences. ~350 tokens ambient cost, no Docker, no API keys, no MCP.",
   "version": "0.1.0",
+  "category": "developer-tools",
   "author": {
-    "name": "Sebastian Breguel"
+    "name": "Sebastian Breguel",
+    "email": "breguelsebastian@gmail.com"
   },
   "homepage": "https://github.com/sebastianbreguel/claude-engram",
   "repository": "https://github.com/sebastianbreguel/claude-engram",
@@ -15,7 +18,7 @@
     "handoff",
     "sqlite",
     "hooks",
-    "claude-code-plugin"
+    "persistent-memory"
   ],
   "privacy_policy": "https://github.com/sebastianbreguel/claude-engram/blob/main/docs/privacy.md"
 }

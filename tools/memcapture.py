@@ -433,40 +433,58 @@ class MemoryDB:
             ),
         )
 
-        for fact in session.facts:
-            content_hash = self._content_hash(fact["content"])
-            if self.fact_exists(content_hash):
-                continue  # dedup
-            self.conn.execute(
-                "INSERT INTO facts (session_id, type, content, content_hash, source_line) VALUES (?, ?, ?, ?, ?)",
-                (
-                    session.session_id,
-                    fact["type"],
-                    fact["content"],
-                    content_hash,
-                    fact.get("source_line"),
-                ),
+        # Batch dedup: one SELECT instead of per-fact queries
+        if session.facts:
+            by_hash: dict[str, dict] = {}
+            for f in session.facts:
+                h = self._content_hash(f["content"])
+                if h not in by_hash:
+                    by_hash[h] = f
+            placeholders = ",".join("?" * len(by_hash))
+            existing = {
+                row[0]
+                for row in self.conn.execute(
+                    f"SELECT content_hash FROM facts WHERE content_hash IN ({placeholders})",
+                    list(by_hash.keys()),
+                ).fetchall()
+            }
+            new_rows = [
+                (session.session_id, f["type"], f["content"], h, f.get("source_line"))
+                for h, f in by_hash.items()
+                if h not in existing
+            ]
+            if new_rows:
+                self.conn.executemany(
+                    "INSERT INTO facts (session_id, type, content, content_hash, source_line) VALUES (?, ?, ?, ?, ?)",
+                    new_rows,
+                )
+                try:
+                    self.conn.executemany(
+                        "INSERT INTO facts_fts (content, type, project) VALUES (?, ?, ?)",
+                        [(r[2], r[1], session.project) for r in new_rows],
+                    )
+                except sqlite3.OperationalError:
+                    pass
+
+        file_rows = [
+            (session.session_id, path, action, count)
+            for path, action_counts in session.files.items()
+            for action, count in action_counts.items()
+        ]
+        if file_rows:
+            self.conn.executemany(
+                "INSERT INTO files_touched (session_id, path, action, count) VALUES (?, ?, ?, ?)",
+                file_rows,
             )
-            # Incremental FTS insert — no full rebuild needed
-            try:
-                self.conn.execute(
-                    "INSERT INTO facts_fts (content, type, project) VALUES (?, ?, ?)",
-                    (fact["content"], fact["type"], session.project),
-                )
-            except sqlite3.OperationalError:
-                pass
 
-        for path, action_counts in session.files.items():
-            for action, count in action_counts.items():
-                self.conn.execute(
-                    "INSERT INTO files_touched (session_id, path, action, count) VALUES (?, ?, ?, ?)",
-                    (session.session_id, path, action, count),
-                )
-
-        for tool, count in session.tools.items():
-            self.conn.execute(
+        tool_rows = [
+            (session.session_id, tool, count)
+            for tool, count in session.tools.items()
+        ]
+        if tool_rows:
+            self.conn.executemany(
                 "INSERT OR REPLACE INTO tool_usage (session_id, tool_name, count) VALUES (?, ?, ?)",
-                (session.session_id, tool, count),
+                tool_rows,
             )
 
         self.conn.commit()
