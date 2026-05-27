@@ -1,6 +1,6 @@
 # Claude-engram
 
-[![tests](https://img.shields.io/github/actions/workflow/status/sebastianbreguel/claude-engram/test.yml?branch=main&label=tests&style=flat)](https://github.com/sebastianbreguel/claude-engram/actions/workflows/test.yml) [![license](https://img.shields.io/github/license/sebastianbreguel/claude-engram?style=flat)](LICENSE)
+[![tests](https://img.shields.io/github/actions/workflow/status/sebastianbreguel/claude-engram/test.yml?branch=main&label=tests&style=flat)](https://github.com/sebastianbreguel/claude-engram/actions/workflows/test.yml) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?style=flat)](https://www.python.org/) [![license](https://img.shields.io/github/license/sebastianbreguel/claude-engram?style=flat)](LICENSE)
 
 **Claude forgets everything between sessions.** Your preferences, your project state, where you left off — gone the moment you close the terminal.
 
