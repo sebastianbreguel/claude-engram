@@ -449,9 +449,7 @@ class MemoryDB:
                 ).fetchall()
             }
             new_rows = [
-                (session.session_id, f["type"], f["content"], h, f.get("source_line"))
-                for h, f in by_hash.items()
-                if h not in existing
+                (session.session_id, f["type"], f["content"], h, f.get("source_line")) for h, f in by_hash.items() if h not in existing
             ]
             if new_rows:
                 self.conn.executemany(
@@ -477,10 +475,7 @@ class MemoryDB:
                 file_rows,
             )
 
-        tool_rows = [
-            (session.session_id, tool, count)
-            for tool, count in session.tools.items()
-        ]
+        tool_rows = [(session.session_id, tool, count) for tool, count in session.tools.items()]
         if tool_rows:
             self.conn.executemany(
                 "INSERT OR REPLACE INTO tool_usage (session_id, tool_name, count) VALUES (?, ?, ?)",

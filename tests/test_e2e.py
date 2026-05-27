@@ -343,5 +343,3 @@ def test_ingest_digest_is_idempotent(tmp_home):
     assert first.count("prefers uv over pip") == second.count("prefers uv over pip"), (
         "repeated ingest of identical digest produced duplicate memories"
     )
-
-
