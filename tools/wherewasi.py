@@ -156,3 +156,48 @@ class ResumeDoc:
             git={},
             last_error=_field("Último error"),
         )
+
+
+def resume_path_for(cwd: str) -> Path:
+    slug = cwd.replace("/", "-")
+    return Path.home() / ".claude" / "wherewasi" / "resume" / f"{slug}.md"
+
+
+def _project_name(cwd: str) -> str:
+    return Path(cwd).name or cwd
+
+
+def capture_rolling(cwd: str, transcript: Path | None) -> None:
+    """No-LLM refresh: fresh git + transcript-tail fields, preserving prior narrative."""
+    path = resume_path_for(cwd)
+    git = build_git_context(cwd)
+    tail = parse_transcript_tail(transcript) if transcript else {"rough_task": "", "edited_files": [], "last_error": ""}
+    prev_task = prev_next = ""
+    if path.exists():
+        prev = ResumeDoc.load(path)
+        prev_task, prev_next = prev.task, prev.next_step
+    task = prev_task or tail["rough_task"]  # keep LLM narrative if present
+    ResumeDoc(
+        project=_project_name(cwd),
+        task=task,
+        next_step=prev_next,
+        git=git,
+        last_error=tail["last_error"] or "ninguno",
+        edited_files=tail["edited_files"],
+    ).write(path)
+
+
+def render_session_start(cwd: str) -> str:
+    """Render the resume for SessionStart. Git is refreshed LIVE so the banner
+    reflects the repo's state at open (commits/dirty drift since last capture)."""
+    path = resume_path_for(cwd)
+    git = build_git_context(cwd)
+    if path.exists():
+        try:
+            doc = ResumeDoc.load(path)  # narrative (Último/Sigue/error) from disk
+            doc.git = git  # refresh git live
+            return doc.render()
+        except Exception:
+            pass
+    # First session / no file → minimal git-only resume.
+    return ResumeDoc(project=_project_name(cwd), task="", next_step="", git=git).render()
