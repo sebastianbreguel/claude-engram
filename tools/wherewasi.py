@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -82,3 +83,76 @@ def parse_transcript_tail(transcript_path: Path) -> dict:
                     if any(k in txt for k in ("Error", "Traceback", "error:", "Exception")):
                         last_error = txt.strip()[:200]  # latest wins
     return {"rough_task": rough_task, "edited_files": edited[-10:], "last_error": last_error}
+
+
+class ResumeDoc:
+    """Per-project resume. Markdown on disk, replace-on-write with a .prev backup.
+    `Último`/`Sigue` (LLM narrative) are passed in by the caller; rolling captures
+    preserve them by loading the prior doc and passing its values back in."""
+
+    def __init__(
+        self,
+        project: str,
+        task: str,
+        next_step: str,
+        git: dict,
+        last_error: str = "ninguno",
+        edited_files: list[str] | None = None,
+    ):
+        self.project = project
+        self.task = (task or "").strip()
+        self.next_step = (next_step or "").strip()
+        self.git = git or {}
+        self.last_error = (last_error or "ninguno").strip()
+        self.edited_files = edited_files or []
+
+    def render(self) -> str:
+        g = self.git
+        branch = g.get("branch") or "?"
+        commits = g.get("commits") or []
+        last_commit = commits[0] if commits else "—"
+        files = ", ".join(dict.fromkeys((g.get("dirty_files") or []) + self.edited_files))[:300]
+        lines = [
+            f"# where was i: {self.project}  ·  branch {branch}",
+            "",
+            f"Último: {self.task or '(sin tarea registrada)'}",
+            f"Sigue: {self.next_step or '(sin próximo paso)'}",
+            "",
+            f"Repo: {branch} · {g.get('uncommitted', 0)} sin commitear · último: {last_commit}",
+        ]
+        if files:
+            lines.append(f"Archivos: {files}")
+        lines.append(f"Último error: {self.last_error or 'ninguno'}")
+        return "\n".join(lines) + "\n"
+
+    def write(self, path: Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            try:
+                path.with_suffix(path.suffix + ".prev").write_text(path.read_text())
+            except Exception:
+                pass
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(self.render())
+        tmp.replace(path)
+
+    @classmethod
+    def load(cls, path: Path) -> "ResumeDoc":
+        text = Path(path).read_text()
+
+        def _field(label: str) -> str:
+            m = re.search(rf"^{label}:\s*(.*)$", text, re.MULTILINE)
+            return m.group(1).strip() if m else ""
+
+        proj = ""
+        m = re.search(r"^# where was i:\s*([^·]+)", text, re.MULTILINE)
+        if m:
+            proj = m.group(1).strip()
+        return cls(
+            project=proj,
+            task=_field("Último"),
+            next_step=_field("Sigue"),
+            git={},
+            last_error=_field("Último error"),
+        )
