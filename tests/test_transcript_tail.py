@@ -28,7 +28,10 @@ def test_extracts_task_edited_files_and_error(tmp_path):
             },
             {
                 "type": "user",
-                "message": {"role": "user", "content": [{"type": "tool_result", "content": "Traceback: ValueError: bad token"}]},
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "content": "Traceback: ValueError: bad token", "is_error": True}],
+                },
             },
         ],
     )
@@ -36,6 +39,22 @@ def test_extracts_task_edited_files_and_error(tmp_path):
     assert "auth retry" in out["rough_task"]
     assert "src/auth.py" in out["edited_files"]
     assert "ValueError" in out["last_error"]
+
+
+def test_normal_output_with_word_error_is_not_flagged(tmp_path):
+    # Tool output that merely contains "error" must NOT be treated as an error —
+    # only results Claude Code marked is_error=true count.
+    t = tmp_path / "t2.jsonl"
+    _write_jsonl(
+        t,
+        [
+            {
+                "type": "user",
+                "message": {"role": "user", "content": [{"type": "tool_result", "content": "ruff: Found 1 error\ncommitted"}]},
+            }
+        ],
+    )
+    assert parse_transcript_tail(t)["last_error"] == ""
 
 
 def test_missing_file_returns_empty():

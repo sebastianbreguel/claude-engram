@@ -82,10 +82,11 @@ def parse_transcript_tail(transcript_path: Path) -> dict:
                         edited.append(fp)
         if isinstance(content, list):
             for b in content:
-                if isinstance(b, dict) and b.get("type") == "tool_result":
-                    txt = _text_of(b.get("content"))
-                    if any(k in txt for k in ("Error", "Traceback", "error:", "Exception")):
-                        last_error = txt.strip()[:200]  # latest wins
+                # Trust Claude Code's structured is_error flag, not keyword sniffing:
+                # normal coding output ("0 errors", "Found 1 error", grep hits) is full of
+                # the word "error" and would constantly false-positive. Latest failure wins.
+                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+                    last_error = _text_of(b.get("content")).strip()[:200]
     return {"rough_task": rough_task, "edited_files": edited[-10:], "last_error": last_error}
 
 
