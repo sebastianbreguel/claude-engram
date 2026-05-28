@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -201,3 +203,68 @@ def render_session_start(cwd: str) -> str:
             pass
     # First session / no file → minimal git-only resume.
     return ResumeDoc(project=_project_name(cwd), task="", next_step="", git=git).render()
+
+
+RESUME_PROMPT = (
+    "You are summarizing a coding session so the developer can resume next time. "
+    "From the transcript, output exactly two lines:\n"
+    "TASK: <one sentence — what they were actively doing>\n"
+    "NEXT: <one sentence — the most likely next step>\n"
+    "Be concrete and terse. No preamble."
+)
+
+
+def _run_claude(prompt: str, chunk: str, timeout: int = 120) -> str:
+    if os.environ.get("WWI_SKIP_LLM") == "1":
+        return ""
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        return ""
+    cmd = [claude_bin, "--print"]
+    model = os.environ.get("WWI_MODEL", "claude-sonnet-4-6")
+    if model:
+        cmd += ["--model", model]
+    cmd += ["-p", prompt]
+    try:
+        r = subprocess.run(cmd, input=chunk, capture_output=True, text=True, timeout=timeout)
+        return r.stdout if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _parse_llm_resume(out: str) -> tuple[str, str]:
+    task = next_step = ""
+    for ln in out.splitlines():
+        if ln.upper().startswith("TASK:"):
+            task = ln.split(":", 1)[1].strip()
+        elif ln.upper().startswith("NEXT:"):
+            next_step = ln.split(":", 1)[1].strip()
+    return task, next_step
+
+
+def build_resume_llm(cwd: str, transcript: Path | None) -> None:
+    """Compaction path: LLM polishes task/next_step. On skip/failure, carry prior narrative."""
+    path = resume_path_for(cwd)
+    git = build_git_context(cwd)
+    tail = parse_transcript_tail(transcript) if transcript else {"rough_task": "", "edited_files": [], "last_error": ""}
+    prev_task = prev_next = ""
+    if path.exists():
+        prev = ResumeDoc.load(path)
+        prev_task, prev_next = prev.task, prev.next_step
+
+    chunk = ""
+    if transcript:
+        try:
+            chunk = Path(transcript).read_text(errors="ignore")[-12000:]
+        except Exception:
+            chunk = ""
+    task, next_step = _parse_llm_resume(_run_claude(RESUME_PROMPT, chunk)) if chunk else ("", "")
+
+    ResumeDoc(
+        project=_project_name(cwd),
+        task=task or prev_task or tail["rough_task"],
+        next_step=next_step or prev_next,
+        git=git,
+        last_error=tail["last_error"] or "ninguno",
+        edited_files=tail["edited_files"],
+    ).write(path)
