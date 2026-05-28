@@ -200,6 +200,7 @@ def render_session_start(cwd: str) -> str:
         try:
             doc = ResumeDoc.load(path)  # narrative (Último/Sigue/error) from disk
             doc.git = git  # refresh git live
+            doc.project = _project_name(cwd)  # authoritative; avoids `·`-truncation from load
             return doc.render()
         except Exception:
             pass
@@ -291,22 +292,28 @@ def _emit(additional_context: str = "", event: str = "SessionStart", banner: str
     return 0
 
 
-_COUNTER = Path.home() / ".claude" / ".wherewasi-prompt-count"
 _DIGEST_EVERY = int(os.environ.get("WWI_DIGEST_EVERY", "25"))
 
 
-def _read_counter() -> tuple[str, int]:
+def _counter_path(cwd: str) -> Path:
+    """One prompt counter per project (cwd). A single global counter starves the
+    rolling refresh when two sessions are open at once; per-cwd matches the per-project
+    resume and never thrashes."""
+    slug = cwd.replace("/", "-")
+    return Path.home() / ".claude" / "wherewasi" / f".count-{slug}"
+
+
+def _read_counter(path: Path) -> int:
     try:
-        sid, n = _COUNTER.read_text().strip().rsplit(":", 1)
-        return sid, int(n)
+        return int(path.read_text().strip())
     except Exception:
-        return "", 0
+        return 0
 
 
-def _write_counter(sid: str, n: int) -> None:
+def _write_counter(path: Path, n: int) -> None:
     try:
-        _COUNTER.parent.mkdir(parents=True, exist_ok=True)
-        _COUNTER.write_text(f"{sid}:{n}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(n))
     except Exception:
         pass
 
@@ -331,15 +338,13 @@ def on_session_start() -> int:
 
 def on_user_prompt() -> int:
     p = _read_payload()
-    sid = p.get("session_id") or ""
     cwd = p.get("cwd") or ""
-    if not sid or not cwd:
+    if not cwd:
         return _emit(event="UserPromptSubmit")
-    prev, n = _read_counter()
-    n = n + 1 if prev == sid else 1
-    _write_counter(sid, n)
+    cpath = _counter_path(cwd)
+    n = _read_counter(cpath) + 1
     if n >= _DIGEST_EVERY:
-        _write_counter(sid, 0)
+        _write_counter(cpath, 0)
         transcript = _find_transcript(p)
         # fire-and-forget rolling capture (no LLM)
         try:
@@ -357,6 +362,8 @@ def on_user_prompt() -> int:
             )
         except Exception:
             pass
+    else:
+        _write_counter(cpath, n)
     return _emit(event="UserPromptSubmit")
 
 

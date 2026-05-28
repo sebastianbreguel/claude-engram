@@ -27,7 +27,7 @@ Two load-bearing lines — **Último** (last task) and **Sigue** (next step) —
 
 ## How it works
 
-WhereWasI is **files + hooks. No database.** One Markdown file per project at `~/.claude/wherewasi/resume/<project>.md`, refreshed two ways:
+WhereWasI is **files + hooks. No database.** One Markdown file per project at `~/.claude/wherewasi/resume/<cwd-slug>.md` (the cwd path, slashes turned to dashes), refreshed two ways:
 
 1. **Every 25 prompts** (`UserPromptSubmit`, **no LLM**) — a cheap refresh of the git fields (branch, uncommitted count, last commit, dirty files) and transcript tail (edited files, last error). Your `Último`/`Sigue` narrative is preserved.
 2. **On compaction** (`PreCompact`, **LLM**) — `claude --print` reads the transcript tail and rewrites `Último` + `Sigue` from what you were actually doing.
@@ -53,6 +53,8 @@ git clone https://github.com/sebastianbreguel/wherewasi.git
 cd wherewasi && ./install.sh
 ```
 
+> Use **the marketplace install OR `./install.sh`, not both** — each registers the hooks separately, so doing both fires every hook twice (and pays the compaction LLM cost twice).
+
 > **First session in a project:** you get a minimal git-only resume.
 > **After you've worked a bit:** the resume fills in with your last task + next step.
 
@@ -72,7 +74,7 @@ Or use the slash command: `/wherewasi` (show) · `/wherewasi --reset` (clear).
 
 ## Privacy and transparency
 
-Everything lives in `~/.claude/wherewasi/resume/<project>.md` (plain Markdown). Nothing leaves your machine except the one LLM call below.
+Everything lives in `~/.claude/wherewasi/resume/<cwd-slug>.md` (plain Markdown). Nothing leaves your machine except the one LLM call below.
 
 - **Stored**: project name, git branch/commit/dirty-file list, the edited-files list and last-error string from the transcript tail, and the LLM-written `Último`/`Sigue` lines.
 - **NOT stored**: no full transcripts, no source code, no secrets from `.env`.
