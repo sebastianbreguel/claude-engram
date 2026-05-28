@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -29,3 +30,55 @@ def build_git_context(cwd: str) -> dict:
         "commits": commits,
         "dirty_files": dirty_files,
     }
+
+
+_EDIT_TOOLS = {"Edit", "Write", "NotebookEdit"}
+_TAIL_LINES = 400  # cap how far back we scan
+
+
+def _text_of(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "text":
+                parts.append(b.get("text", ""))
+        return " ".join(parts)
+    return ""
+
+
+def parse_transcript_tail(transcript_path: Path) -> dict:
+    """Pull a rough task (last substantive user msg), edited files, and last error
+    from the tail of a transcript JSONL. Best-effort; empty fields on any failure."""
+    empty = {"rough_task": "", "edited_files": [], "last_error": ""}
+    try:
+        lines = Path(transcript_path).read_text(errors="ignore").splitlines()[-_TAIL_LINES:]
+    except Exception:
+        return empty
+
+    rough_task = ""
+    edited: list[str] = []
+    last_error = ""
+    for ln in lines:
+        try:
+            obj = json.loads(ln)
+        except Exception:
+            continue
+        msg = obj.get("message", {})
+        content = msg.get("content")
+        if obj.get("type") == "user" and isinstance(content, str) and content.strip():
+            rough_task = content.strip()[:200]  # latest wins
+        if obj.get("type") == "assistant" and isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") in _EDIT_TOOLS:
+                    fp = (b.get("input") or {}).get("file_path")
+                    if fp and fp not in edited:
+                        edited.append(fp)
+        if isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    txt = _text_of(b.get("content"))
+                    if any(k in txt for k in ("Error", "Traceback", "error:", "Exception")):
+                        last_error = txt.strip()[:200]  # latest wins
+    return {"rough_task": rough_task, "edited_files": edited[-10:], "last_error": last_error}
