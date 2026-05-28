@@ -91,7 +91,7 @@ def parse_transcript_tail(transcript_path: Path) -> dict:
 
 class ResumeDoc:
     """Per-project resume. Markdown on disk, replace-on-write with a .prev backup.
-    `Último`/`Sigue` (LLM narrative) are passed in by the caller; rolling captures
+    `Last`/`Next` (LLM narrative) are passed in by the caller; rolling captures
     preserve them by loading the prior doc and passing its values back in."""
 
     def __init__(
@@ -100,14 +100,14 @@ class ResumeDoc:
         task: str,
         next_step: str,
         git: dict,
-        last_error: str = "ninguno",
+        last_error: str = "none",
         edited_files: list[str] | None = None,
     ):
         self.project = project
         self.task = (task or "").strip()
         self.next_step = (next_step or "").strip()
         self.git = git or {}
-        self.last_error = (last_error or "ninguno").strip()
+        self.last_error = (last_error or "none").strip()
         self.edited_files = edited_files or []
 
     def render(self) -> str:
@@ -119,14 +119,14 @@ class ResumeDoc:
         lines = [
             f"# where was i: {self.project}  ·  branch {branch}",
             "",
-            f"Último: {self.task or '(sin tarea registrada)'}",
-            f"Sigue: {self.next_step or '(sin próximo paso)'}",
+            f"Last: {self.task or '(no task recorded)'}",
+            f"Next: {self.next_step or '(no next step)'}",
             "",
-            f"Repo: {branch} · {g.get('uncommitted', 0)} sin commitear · último: {last_commit}",
+            f"Repo: {branch} · {g.get('uncommitted', 0)} uncommitted · last: {last_commit}",
         ]
         if files:
-            lines.append(f"Archivos: {files}")
-        lines.append(f"Último error: {self.last_error or 'ninguno'}")
+            lines.append(f"Files: {files}")
+        lines.append(f"Last error: {self.last_error or 'none'}")
         return "\n".join(lines) + "\n"
 
     def write(self, path: Path) -> None:
@@ -155,10 +155,10 @@ class ResumeDoc:
             proj = m.group(1).strip()
         return cls(
             project=proj,
-            task=_field("Último"),
-            next_step=_field("Sigue"),
+            task=_field("Last"),
+            next_step=_field("Next"),
             git={},
-            last_error=_field("Último error"),
+            last_error=_field("Last error"),
         )
 
 
@@ -186,7 +186,7 @@ def capture_rolling(cwd: str, transcript: Path | None) -> None:
         task=task,
         next_step=prev_next,
         git=git,
-        last_error=tail["last_error"] or "ninguno",
+        last_error=tail["last_error"] or "none",
         edited_files=tail["edited_files"],
     ).write(path)
 
@@ -198,7 +198,7 @@ def render_session_start(cwd: str) -> str:
     git = build_git_context(cwd)
     if path.exists():
         try:
-            doc = ResumeDoc.load(path)  # narrative (Último/Sigue/error) from disk
+            doc = ResumeDoc.load(path)  # narrative (Last/Next/error) from disk
             doc.git = git  # refresh git live
             doc.project = _project_name(cwd)  # authoritative; avoids `·`-truncation from load
             return doc.render()
@@ -268,7 +268,7 @@ def build_resume_llm(cwd: str, transcript: Path | None) -> None:
         task=task or prev_task or tail["rough_task"],
         next_step=next_step or prev_next,
         git=git,
-        last_error=tail["last_error"] or "ninguno",
+        last_error=tail["last_error"] or "none",
         edited_files=tail["edited_files"],
     ).write(path)
 
@@ -334,8 +334,8 @@ def _colorize_banner(text: str) -> str:
     proj = "\033[1;36m"  # bold cyan — project name
     num = "\033[1;33m"  # bold yellow — branch / counts
     dim = "\033[90m"  # gray — separators, low-signal lines
-    label = "\033[1;32m"  # bold green — the load-bearing Último/Sigue labels
-    val = "\033[97m"  # bright white — Último/Sigue values
+    label = "\033[1;32m"  # bold green — the load-bearing Last/Next labels
+    val = "\033[97m"  # bright white — Last/Next values
     err = "\033[1;31m"  # bold red — a real last error
     sep = f" {dim}·{reset} "
     lines = []
@@ -346,14 +346,14 @@ def _colorize_banner(text: str) -> str:
             if len(parts) > 1:
                 head += sep + f"{dim}branch{reset} {num}{parts[1].replace('branch ', '', 1)}{reset}"
             lines.append(head)
-        elif ln.startswith("Último error:"):
+        elif ln.startswith("Last error:"):
             v = ln.split(":", 1)[1].strip()
-            lines.append(f"{dim}Último error:{reset} {dim if v == 'ninguno' else err}{v}{reset}")
-        elif ln.startswith("Último:"):
-            lines.append(f"{label}Último:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
-        elif ln.startswith("Sigue:"):
-            lines.append(f"{label}Sigue:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
-        elif ln.startswith("Repo:") or ln.startswith("Archivos:"):
+            lines.append(f"{dim}Last error:{reset} {dim if v == 'none' else err}{v}{reset}")
+        elif ln.startswith("Last:"):
+            lines.append(f"{label}Last:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
+        elif ln.startswith("Next:"):
+            lines.append(f"{label}Next:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
+        elif ln.startswith("Repo:") or ln.startswith("Files:"):
             lines.append(f"{dim}{ln}{reset}")
         else:
             lines.append(ln)

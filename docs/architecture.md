@@ -39,23 +39,23 @@ Manual installs use `$HOME/.claude` instead of `$CLAUDE_PLUGIN_ROOT` — both pa
 
 ## The resume file
 
-One Markdown file per project, **replace-on-write** (no history). The two `Último`/`Sigue`
+One Markdown file per project, **replace-on-write** (no history). The two `Last`/`Next`
 lines are the LLM-written narrative; everything else is cheap git/transcript context.
 
 ```markdown
 # where was i: <project>  ·  branch <branch>
 
-Último: <last task — LLM, from the last compaction>
-Sigue: <next step — LLM>
+Last: <last task — LLM, from the last compaction>
+Next: <next step — LLM>
 
-Repo: <branch> · <N> sin commitear · último: <hash> <subject>
-Archivos: <dirty + recently edited files, capped>
-Último error: <last error string, or "ninguno">
+Repo: <branch> · <N> uncommitted · last: <hash> <subject>
+Files: <dirty + recently edited files, capped>
+Last error: <last error string, or "none">
 ```
 
 `ResumeDoc` (in `wherewasi.py`) owns this format: `render()` builds the Markdown,
 `write()` saves it atomically (write to `.tmp`, then `replace`) after copying the prior
-file to `.prev`, and `load()` parses back the project + `Último`/`Sigue`/`Último error`
+file to `.prev`, and `load()` parses back the project + `Last`/`Next`/`Last error`
 lines. Git is **never** parsed back from disk — it's always rebuilt live (see below).
 
 ## Orchestration
@@ -74,7 +74,7 @@ lines. Git is **never** parsed back from disk — it's always rebuilt live (see 
 1. Bump a per-session counter in `~/.claude/.wherewasi-prompt-count`.
 2. Every `WWI_DIGEST_EVERY` prompts (default 25), reset the counter and fire a
    **fire-and-forget** rolling capture (`capture-rolling` subprocess, **no LLM**): fresh
-   git + transcript-tail fields, preserving the prior `Último`/`Sigue`.
+   git + transcript-tail fields, preserving the prior `Last`/`Next`.
 3. Return immediately — the active prompt is never blocked.
 
 ### PreCompact (`wherewasi.py on-precompact`)
@@ -82,7 +82,7 @@ lines. Git is **never** parsed back from disk — it's always rebuilt live (see 
 1. `build_resume_llm(cwd, transcript)`: read the transcript tail (last ~12 KB), send it to
    `claude --print` with the resume prompt, and parse two lines (`TASK:` / `NEXT:`).
 2. Write the resume with the fresh narrative + live git fields. On LLM skip/failure, carry
-   the prior `Último`/`Sigue` forward (best-effort, never raises).
+   the prior `Last`/`Next` forward (best-effort, never raises).
 
 ## Core units (all in `tools/wherewasi.py`)
 

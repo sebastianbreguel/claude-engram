@@ -16,7 +16,7 @@ def test_write_then_load_roundtrip(tmp_path):
         task="doing X",
         next_step="do Y",
         git={"branch": "main", "uncommitted": 2, "commits": ["abc fix"], "dirty_files": ["a.py"]},
-        last_error="ninguno",
+        last_error="none",
     ).write(p)
     loaded = ResumeDoc.load(p)
     assert loaded.task == "doing X"

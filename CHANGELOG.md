@@ -15,7 +15,7 @@ memory bank to a per-project resume tool.** One break, clean identity.
   `engram.py` + `memcapture.py` + `memdoctor.py`.
 - **Runtime:** hooks run via `python3` (no `uv` required at runtime).
 - **Capture:** rolling refresh every 25 prompts (`UserPromptSubmit`, no LLM) + an LLM
-  rewrite of `Último`/`Sigue` on compaction (`PreCompact`). SessionStart reads the file and
+  rewrite of `Last`/`Next` on compaction (`PreCompact`). SessionStart reads the file and
   refreshes git live — zero LLM at open.
 - **Env vars:** `ENGRAM_*` → `WWI_*` (`WWI_MODEL`, `WWI_SKIP_LLM`, `WWI_DIGEST_EVERY`,
   `WWI_SHOW_BANNER`).
