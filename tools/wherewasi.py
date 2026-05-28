@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -268,3 +270,143 @@ def build_resume_llm(cwd: str, transcript: Path | None) -> None:
         last_error=tail["last_error"] or "ninguno",
         edited_files=tail["edited_files"],
     ).write(path)
+
+
+def _read_payload() -> dict:
+    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    try:
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+
+def _emit(additional_context: str = "", event: str = "SessionStart", banner: str = "") -> int:
+    out: dict = {"continue": True}
+    if additional_context:
+        out["hookSpecificOutput"] = {"hookEventName": event, "additionalContext": additional_context}
+        out["suppressOutput"] = True
+    if banner:
+        out["systemMessage"] = banner
+    print(json.dumps(out))
+    return 0
+
+
+_COUNTER = Path.home() / ".claude" / ".wherewasi-prompt-count"
+_DIGEST_EVERY = int(os.environ.get("WWI_DIGEST_EVERY", "25"))
+
+
+def _read_counter() -> tuple[str, int]:
+    try:
+        sid, n = _COUNTER.read_text().strip().rsplit(":", 1)
+        return sid, int(n)
+    except Exception:
+        return "", 0
+
+
+def _write_counter(sid: str, n: int) -> None:
+    try:
+        _COUNTER.parent.mkdir(parents=True, exist_ok=True)
+        _COUNTER.write_text(f"{sid}:{n}")
+    except Exception:
+        pass
+
+
+def _find_transcript(payload: dict) -> Path | None:
+    tp = payload.get("transcript_path")
+    return Path(tp) if tp and Path(tp).exists() else None
+
+
+def on_session_start() -> int:
+    p = _read_payload()
+    cwd = p.get("cwd") or ""
+    if not cwd:
+        return _emit()
+    try:
+        ctx = render_session_start(cwd)
+    except Exception:
+        ctx = ""
+    show = os.environ.get("WWI_SHOW_BANNER", "1") == "1"
+    return _emit(ctx, event="SessionStart", banner=ctx if show else "")
+
+
+def on_user_prompt() -> int:
+    p = _read_payload()
+    sid = p.get("session_id") or ""
+    cwd = p.get("cwd") or ""
+    if not sid or not cwd:
+        return _emit(event="UserPromptSubmit")
+    prev, n = _read_counter()
+    n = n + 1 if prev == sid else 1
+    _write_counter(sid, n)
+    if n >= _DIGEST_EVERY:
+        _write_counter(sid, 0)
+        transcript = _find_transcript(p)
+        # fire-and-forget rolling capture (no LLM)
+        try:
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__)),
+                    "capture-rolling",
+                    "--cwd",
+                    cwd,
+                    *(["--transcript", str(transcript)] if transcript else []),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+    return _emit(event="UserPromptSubmit")
+
+
+def on_precompact() -> int:
+    p = _read_payload()
+    cwd = p.get("cwd") or ""
+    if cwd:
+        try:
+            build_resume_llm(cwd, _find_transcript(p))
+        except Exception:
+            pass
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="wherewasi")
+    sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("on-session-start")
+    sub.add_parser("on-user-prompt")
+    sub.add_parser("on-precompact")
+    cr = sub.add_parser("capture-rolling")
+    cr.add_argument("--cwd", required=True)
+    cr.add_argument("--transcript")
+    parser.add_argument("--reset", action="store_true")
+    parser.add_argument("--cwd", dest="show_cwd")
+    args = parser.parse_args(argv)
+
+    if args.cmd == "on-session-start":
+        return on_session_start()
+    if args.cmd == "on-user-prompt":
+        return on_user_prompt()
+    if args.cmd == "on-precompact":
+        return on_precompact()
+    if args.cmd == "capture-rolling":
+        try:
+            t = Path(args.transcript) if args.transcript else None
+            capture_rolling(args.cwd, t)
+        except Exception:
+            pass
+        return 0
+    # bare CLI: reset or show
+    cwd = args.show_cwd or os.getcwd()
+    if args.reset:
+        resume_path_for(cwd).unlink(missing_ok=True)
+        resume_path_for(cwd).with_suffix(".md.prev").unlink(missing_ok=True)
+        print("resume cleared")
+        return 0
+    print(render_session_start(cwd))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
