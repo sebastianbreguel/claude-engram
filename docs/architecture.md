@@ -7,9 +7,9 @@ WhereWasI is a Claude Code plugin with **three hooks and one Python file**. No d
 ```
 ~/.claude/
 ├── wherewasi/
-│   └── resume/<cwd-slug>.md        # Per-project resume (the thing you see at session start)
-│   └── resume/<cwd-slug>.md.prev   # Previous version (safety net against a half-written file)
-├── .wherewasi-prompt-count         # Rolling prompt counter (one line: "<session_id>:<n>")
+│   ├── resume/<cwd-slug>.md        # Per-project resume (the thing you see at session start)
+│   ├── resume/<cwd-slug>.md.prev   # Previous version (safety net against a half-written file)
+│   └── .count-<cwd-slug>           # Per-project prompt counter (drives the rolling refresh)
 │
 └── tools/
     └── wherewasi.py                # The whole plugin: git context + transcript parser +
@@ -30,7 +30,9 @@ Registered in `hooks/hooks.json` (plugin) / `~/.claude/settings.json` (manual in
     "PreCompact":       [{"hooks": [{"type": "command",
       "command": "python3 ${CLAUDE_PLUGIN_ROOT}/tools/wherewasi.py on-precompact"}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command",
-      "command": "python3 ${CLAUDE_PLUGIN_ROOT}/tools/wherewasi.py on-user-prompt"}]}]
+      "command": "python3 ${CLAUDE_PLUGIN_ROOT}/tools/wherewasi.py on-user-prompt"}]}],
+    "SessionEnd":       [{"hooks": [{"type": "command",
+      "command": "python3 ${CLAUDE_PLUGIN_ROOT}/tools/wherewasi.py on-session-end"}]}]
   }
 }
 ```
@@ -71,18 +73,27 @@ the two lines that actually carry intent.
 
 ### UserPromptSubmit (`wherewasi.py on-user-prompt`)
 
-1. Bump a per-session counter in `~/.claude/.wherewasi-prompt-count`.
+1. Bump a **per-project** counter at `~/.claude/wherewasi/.count-<cwd-slug>` (per-cwd, not
+   global — a single global counter starves the refresh when two sessions are open at once).
 2. Every `WWI_DIGEST_EVERY` prompts (default 25), reset the counter and fire a
-   **fire-and-forget** rolling capture (`capture-rolling` subprocess, **no LLM**): fresh
-   git + transcript-tail fields, preserving the prior `Last`/`Next`.
+   **fire-and-forget detached** rolling capture (`capture-rolling`, **no LLM**): fresh git,
+   preserving the prior `Last`/`Next`.
 3. Return immediately — the active prompt is never blocked.
 
 ### PreCompact (`wherewasi.py on-precompact`)
 
 1. `build_resume_llm(cwd, transcript)`: read the transcript tail (last ~12 KB), send it to
    `claude --print` with the resume prompt, and parse two lines (`TASK:` / `NEXT:`).
-2. Write the resume with the fresh narrative + live git fields. On LLM skip/failure, carry
-   the prior `Last`/`Next` forward (best-effort, never raises).
+2. Write the resume with the fresh narrative + live git fields. Runs **inline** (compaction
+   already pauses). On LLM skip/failure, carry the prior `Last`/`Next` forward.
+
+### SessionEnd (`wherewasi.py on-session-end`)
+
+1. Fire a **fire-and-forget detached** `capture-llm` (`build_resume_llm`) — `start_new_session`
+   so the LLM call runs *after* the session exits and never delays it.
+2. This is the staleness fix: a short session that never compacts still gets a fresh
+   `Last`/`Next` written when you leave, so the next open isn't stale. A hard kill that skips
+   SessionEnd is still covered by the rolling/compact paths.
 
 ## Core units (all in `tools/wherewasi.py`)
 
@@ -92,7 +103,8 @@ the two lines that actually carry intent.
 | `parse_transcript_tail(path)` | `rough_task` (the last user message) from the tail — a fallback for `Last` when there's no LLM narrative yet. |
 | `ResumeDoc` | Load / render / write the resume Markdown, with a `.prev` backup. |
 | `capture_rolling(cwd, transcript)` | No-LLM refresh (UserPromptSubmit path). |
-| `build_resume_llm(cwd, transcript)` | LLM refresh (PreCompact path) + `_run_claude` with the `WWI_MODEL` override. |
+| `build_resume_llm(cwd, transcript)` | LLM refresh (PreCompact inline + SessionEnd detached) + `_run_claude` with the `WWI_MODEL` override. |
+| `_spawn_capture(kind, cwd, transcript)` | Fire-and-forget detached capture (`start_new_session`) — used by UserPromptSubmit and SessionEnd. |
 | `render_session_start(cwd)` | Build the banner/context block; git refreshed live; first-session fallback. |
 | `resume_path_for(cwd)` | Map a cwd to its slugged resume path under `~/.claude/wherewasi/resume/`. |
 | hooks + `main()` | JSON-in/JSON-out hook handlers and the `show` / `--reset` CLI. |

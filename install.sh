@@ -79,6 +79,7 @@ def ensure_hook(event_name, command):
 ensure_hook("PreCompact", "python3 $HOME/.claude/tools/wherewasi.py on-precompact")
 ensure_hook("SessionStart", "python3 $HOME/.claude/tools/wherewasi.py on-session-start")
 ensure_hook("UserPromptSubmit", "python3 $HOME/.claude/tools/wherewasi.py on-user-prompt")
+ensure_hook("SessionEnd", "python3 $HOME/.claude/tools/wherewasi.py on-session-end")
 
 settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 PYEOF

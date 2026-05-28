@@ -25,11 +25,12 @@ Two load-bearing lines — **Last** (where you were) and **Next** (what to do) �
 
 ## How it works
 
-WhereWasI is **files + hooks. No database.** One Markdown file per project at `~/.claude/wherewasi/resume/<cwd-slug>.md` (the cwd path, slashes turned to dashes), refreshed two ways:
+WhereWasI is **files + hooks. No database.** One Markdown file per project at `~/.claude/wherewasi/resume/<cwd-slug>.md` (the cwd path, slashes turned to dashes), refreshed as you work:
 
 1. **Every 25 prompts** (`UserPromptSubmit`, **no LLM**) — a cheap refresh of the git line (branch, uncommitted count, last commit). Your `Last`/`Next` narrative is preserved.
 2. **On compaction** (`PreCompact`, **LLM**) — `claude --print` reads the transcript tail and rewrites `Last` + `Next` from what you were actually doing.
-3. **On session start** (`SessionStart`) — the resume file is read and injected (with git refreshed live). First time in a project? You get a minimal git-derived resume so you never open blank.
+3. **On session end** (`SessionEnd`, **LLM**) — rewrites `Last` + `Next` when you leave, so a short session that never compacted isn't stale the next time you open. Runs detached, so it never delays your exit.
+4. **On session start** (`SessionStart`) — the resume file is read and injected (with git refreshed live). First time in a project? You get a minimal git-derived resume so you never open blank.
 
 Replace semantics: the file always reflects the current state. No history accumulates.
 

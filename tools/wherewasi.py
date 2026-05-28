@@ -307,6 +307,28 @@ def _colorize_banner(text: str) -> str:
     return "\n".join(lines)
 
 
+def _spawn_capture(kind: str, cwd: str, transcript: Path | None) -> None:
+    """Fire-and-forget detached capture (`capture-rolling` or `capture-llm`).
+    start_new_session=True so it survives the hook process exiting and the session
+    tearing down — the LLM capture must outlive a SessionEnd."""
+    try:
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(__file__)),
+                kind,
+                "--cwd",
+                cwd,
+                *(["--transcript", str(transcript)] if transcript else []),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
+
+
 def on_session_start() -> int:
     p = _read_payload()
     cwd = p.get("cwd") or ""
@@ -329,23 +351,7 @@ def on_user_prompt() -> int:
     n = _read_counter(cpath) + 1
     if n >= _DIGEST_EVERY:
         _write_counter(cpath, 0)
-        transcript = _find_transcript(p)
-        # fire-and-forget rolling capture (no LLM)
-        try:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    str(Path(__file__)),
-                    "capture-rolling",
-                    "--cwd",
-                    cwd,
-                    *(["--transcript", str(transcript)] if transcript else []),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        _spawn_capture("capture-rolling", cwd, _find_transcript(p))  # no LLM, fire-and-forget
     else:
         _write_counter(cpath, n)
     return _emit(event="UserPromptSubmit")
@@ -356,9 +362,20 @@ def on_precompact() -> int:
     cwd = p.get("cwd") or ""
     if cwd:
         try:
-            build_resume_llm(cwd, _find_transcript(p))
+            build_resume_llm(cwd, _find_transcript(p))  # inline: compaction already pauses
         except Exception:
             pass
+    return 0
+
+
+def on_session_end() -> int:
+    # Refresh the narrative when you leave, so short sessions that never compact aren't
+    # stale next open. Fire-and-forget + detached: the LLM call runs AFTER the session
+    # exits (never hangs it). Hard-kills that skip SessionEnd are covered by rolling/compact.
+    p = _read_payload()
+    cwd = p.get("cwd") or ""
+    if cwd:
+        _spawn_capture("capture-llm", cwd, _find_transcript(p))
     return 0
 
 
@@ -368,9 +385,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("on-session-start")
     sub.add_parser("on-user-prompt")
     sub.add_parser("on-precompact")
-    cr = sub.add_parser("capture-rolling")
-    cr.add_argument("--cwd", required=True)
-    cr.add_argument("--transcript")
+    sub.add_parser("on-session-end")
+    for name in ("capture-rolling", "capture-llm"):
+        cp = sub.add_parser(name)
+        cp.add_argument("--cwd", required=True)
+        cp.add_argument("--transcript")
     parser.add_argument("--reset", action="store_true")
     parser.add_argument("--cwd", dest="show_cwd")
     args = parser.parse_args(argv)
@@ -381,10 +400,12 @@ def main(argv: list[str] | None = None) -> int:
         return on_user_prompt()
     if args.cmd == "on-precompact":
         return on_precompact()
-    if args.cmd == "capture-rolling":
+    if args.cmd == "on-session-end":
+        return on_session_end()
+    if args.cmd in ("capture-rolling", "capture-llm"):
         try:
             t = Path(args.transcript) if args.transcript else None
-            capture_rolling(args.cwd, t)
+            (capture_rolling if args.cmd == "capture-rolling" else build_resume_llm)(args.cwd, t)
         except Exception:
             pass
         return 0

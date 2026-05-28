@@ -54,7 +54,7 @@ def strip(event_name):
         del hooks[event_name]
 
 
-for ev in ("PreCompact", "SessionStart", "UserPromptSubmit"):
+for ev in ("PreCompact", "SessionStart", "UserPromptSubmit", "SessionEnd"):
     strip(ev)
 
 settings_path.write_text(json.dumps(settings, indent=2) + "\n")

@@ -35,6 +35,22 @@ def test_user_prompt_malformed_stdin_does_not_crash(tmp_path):
     assert json.loads(r.stdout)["continue"] is True
 
 
+def test_session_end_does_not_crash(tmp_path):
+    r = _run(["on-session-end"], "not json", tmp_path)
+    assert r.returncode == 0
+
+
+def test_capture_llm_writes_resume_when_llm_skipped(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    # WWI_SKIP_LLM=1 (set by _run) → no LLM, but the resume file is still written.
+    _run(["capture-llm", "--cwd", str(repo)], "", tmp_path)
+    f = tmp_path / ".claude" / "wherewasi" / "resume" / (str(repo).replace("/", "-") + ".md")
+    assert f.exists()
+    assert "where was i" in f.read_text()
+
+
 def test_cli_reset_removes_file(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
