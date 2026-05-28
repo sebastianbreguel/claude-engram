@@ -1,144 +1,123 @@
 # Architecture
 
-claude-engram is a Claude Code plugin with **three hooks, one Python entrypoint**, and a local SQLite store. No daemon, no network I/O, no API keys.
+WhereWasI is a Claude Code plugin with **three hooks and one Python file**. No database, no daemon, no network I/O, no API keys. The entire plugin is `tools/wherewasi.py` (stdlib only).
 
 ## File layout (after install)
 
 ```
 ~/.claude/
-├── memory.db                    # SQLite — sessions, facts, memories, compactions
-├── session-env/                 # Pre-compact work-state snapshots (markdown)
-├── engram/
-│   └── executive/<cwd-slug>.md       # Per-project executive summary cache (3 bullets)
-│   └── executive/<cwd-slug>.md.prev  # Rotated previous summary (safety net)
+├── wherewasi/
+│   └── resume/<cwd-slug>.md        # Per-project resume (the thing you see at session start)
+│   └── resume/<cwd-slug>.md.prev   # Previous version (safety net against a half-written file)
+├── .wherewasi-prompt-count         # Rolling prompt counter (one line: "<session_id>:<n>")
 │
-├── tools/
-│   ├── engram.py                # Unified CLI + hook orchestrator (single entrypoint)
-│   ├── memcapture.py            # JSONL parser + SQLite writer + FTS5 search
-│   └── memdoctor.py             # Friction signal detector (correction-heavy, error-loop, restart-cluster, ...)
-│
-└── skills/
-    └── reflect/SKILL.md         # /reflect — memory consolidation + advisory rule proposals
+└── tools/
+    └── wherewasi.py                # The whole plugin: git context + transcript parser +
+                                    #   ResumeDoc + hooks + CLI
 ```
+
+`<cwd-slug>` is `cwd.replace("/", "-")`, e.g. `/Users/me/proj` → `-Users-me-proj`.
 
 ## Hook wiring
 
-Registered in `.claude-plugin/plugin.json` + `hooks/hooks.json`. Three events, three commands:
+Registered in `hooks/hooks.json` (plugin) / `~/.claude/settings.json` (manual install). Three events, one tool:
 
 ```json
 {
   "hooks": {
     "SessionStart":     [{"hooks": [{"type": "command",
-      "command": "uv run ${CLAUDE_PLUGIN_ROOT}/tools/engram.py on-session-start"}]}],
+      "command": "python3 ${CLAUDE_PLUGIN_ROOT}/tools/wherewasi.py on-session-start"}]}],
     "PreCompact":       [{"hooks": [{"type": "command",
-      "command": "uv run ${CLAUDE_PLUGIN_ROOT}/tools/engram.py on-precompact"}]}],
+      "command": "python3 ${CLAUDE_PLUGIN_ROOT}/tools/wherewasi.py on-precompact"}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command",
-      "command": "uv run ${CLAUDE_PLUGIN_ROOT}/tools/engram.py on-user-prompt"}]}]
+      "command": "python3 ${CLAUDE_PLUGIN_ROOT}/tools/wherewasi.py on-user-prompt"}]}]
   }
 }
 ```
 
 Manual installs use `$HOME/.claude` instead of `$CLAUDE_PLUGIN_ROOT` — both paths work.
 
+## The resume file
+
+One Markdown file per project, **replace-on-write** (no history). The two `Último`/`Sigue`
+lines are the LLM-written narrative; everything else is cheap git/transcript context.
+
+```markdown
+# where was i: <project>  ·  branch <branch>
+
+Último: <last task — LLM, from the last compaction>
+Sigue: <next step — LLM>
+
+Repo: <branch> · <N> sin commitear · último: <hash> <subject>
+Archivos: <dirty + recently edited files, capped>
+Último error: <last error string, or "ninguno">
+```
+
+`ResumeDoc` (in `wherewasi.py`) owns this format: `render()` builds the Markdown,
+`write()` saves it atomically (write to `.tmp`, then `replace`) after copying the prior
+file to `.prev`, and `load()` parses back the project + `Último`/`Sigue`/`Último error`
+lines. Git is **never** parsed back from disk — it's always rebuilt live (see below).
+
 ## Orchestration
 
-### PreCompact (`engram.py on-precompact`)
+### SessionStart (`wherewasi.py on-session-start`)
 
-1. **Synchronous:** parse transcript + upsert to `memory.db` (sessions, facts, files, tools).
-2. **Fire-and-forget:** spawn detached Sonnet 4.6 subprocess for **digest** (preferences, practices, handoff paragraph) — result ingested back via stdin into `memories`.
-3. **Fire-and-forget:** spawn detached Sonnet 4.6 subprocess for **snapshot** (JSON: task, files, last_error, summary) — stored in `compactions`.
-4. **Fire-and-forget:** spawn detached Sonnet 4.6 subprocess for **executive** — merges Claude Code's `※ recap` + engram's inject_context + `memdoctor` friction signals + git state (branch + dirty files) into a 3-bullet summary (`status` / `last change` / `next`) cached at `~/.claude/engram/executive/<cwd-slug>.md`. Previous cache is rotated to `<cwd-slug>.md.prev` before overwrite as a safety net.
+1. Read `cwd` from the hook payload.
+2. `render_session_start(cwd)`: load the resume file (narrative from disk) and **refresh
+   git live** so the banner reflects the repo's state at open. No file yet (first session)
+   → render a minimal git-only resume so you never open blank.
+3. Emit the resume as `additionalContext` (Claude sees it) + `systemMessage` banner (you
+   see it, unless `WWI_SHOW_BANNER=0`). Zero LLM call, zero latency.
 
-The fire-and-forget subprocesses use `start_new_session=True` so they survive the parent hook's exit. No lockfile — concurrent compactions are absorbed by `PRAGMA busy_timeout=5000` + `UNIQUE(topic)` on `memories`. The executive cache is overwrite-only (latest wins), with one-step rollback via `engram preview --prev`.
+### UserPromptSubmit (`wherewasi.py on-user-prompt`)
 
-### UserPromptSubmit (`engram.py on-user-prompt`)
+1. Bump a per-session counter in `~/.claude/.wherewasi-prompt-count`.
+2. Every `WWI_DIGEST_EVERY` prompts (default 25), reset the counter and fire a
+   **fire-and-forget** rolling capture (`capture-rolling` subprocess, **no LLM**): fresh
+   git + transcript-tail fields, preserving the prior `Último`/`Sigue`.
+3. Return immediately — the active prompt is never blocked.
 
-1. Read `session_id` from payload; bump a per-session counter in `~/.claude/engram/counter.json`.
-2. If count `>= ENGRAM_DIGEST_EVERY` (default 25), fire-and-forget a **digest** subprocess + **executive** rebuild, then reset the counter.
-3. Returns immediately; the active session is never blocked.
+### PreCompact (`wherewasi.py on-precompact`)
 
-This keeps long sessions from going stale: if you hit compaction rarely, mid-session digests still refresh memories and the executive cache every ~25 turns.
+1. `build_resume_llm(cwd, transcript)`: read the transcript tail (last ~12 KB), send it to
+   `claude --print` with the resume prompt, and parse two lines (`TASK:` / `NEXT:`).
+2. Write the resume with the fresh narrative + live git fields. On LLM skip/failure, carry
+   the prior `Último`/`Sigue` forward (best-effort, never raises).
 
-### SessionStart (`engram.py on-session-start`)
+## Core units (all in `tools/wherewasi.py`)
 
-1. Read `cwd` from Claude Code's hook payload, derive `project_key`.
-2. **Fast path:** if `~/.claude/engram/executive/<cwd-slug>.md` exists, read it (~90 chars) and inject as `additionalContext`. Zero LLM call, zero latency.
-3. **Fallback:** call `memcapture --inject --inject-project=<key>` to build ~350 tokens: durable memories (all projects) + ephemeral memories (this project only) + latest snapshot + per-project handoff paragraph.
-4. Optionally emit a banner (`ENGRAM_SHOW_BANNER=1` by default) via `systemMessage`.
-5. Return JSON with `hookSpecificOutput.additionalContext` — Claude Code injects this silently into the new session.
-
-## SQLite schema
-
-```sql
-CREATE TABLE sessions (
-    id INTEGER PRIMARY KEY,
-    session_id TEXT UNIQUE NOT NULL,
-    project TEXT NOT NULL,
-    cwd TEXT, branch TEXT, topic TEXT,
-    message_count INTEGER, tool_count INTEGER,
-    captured_at TEXT NOT NULL,
-    transcript_path TEXT
-);
-
-CREATE TABLE facts (
-    id INTEGER PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(session_id),
-    type TEXT CHECK(type IN ('decision', 'correction', 'error', 'topic')),
-    content TEXT NOT NULL,
-    content_hash TEXT NOT NULL,        -- MD5[0:12] for dedup
-    source_line INTEGER,
-    created_at TEXT DEFAULT (datetime('now')),
-    -- v2 columns (nullable, unused in v1):
-    subject TEXT, predicate TEXT, object TEXT, confidence REAL
-);
-
-CREATE TABLE memories (
-    id INTEGER PRIMARY KEY,
-    topic TEXT UNIQUE NOT NULL,        -- collision absorber: latest extraction wins
-    content TEXT NOT NULL,
-    durability TEXT CHECK(durability IN ('durable', 'ephemeral')),
-    created_at TEXT, last_accessed TEXT,
-    source_session TEXT
-);
-
-CREATE TABLE compactions (
-    id INTEGER PRIMARY KEY,
-    session_id TEXT, project TEXT NOT NULL,
-    snapshot TEXT,                     -- JSON: {task, files, last_error, summary}
-    compacted_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE files_touched (session_id, path, action, count);
-CREATE TABLE tool_usage     (session_id, tool_name, count);
-
--- Full-text search (unicode tokenizer, standalone table)
-CREATE VIRTUAL TABLE facts_fts USING fts5(content, type, project, tokenize='unicode61');
-
-PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 5000;            -- collision absorber
-```
+| Unit | Responsibility |
+|---|---|
+| `build_git_context(cwd)` | Branch, uncommitted count, recent commits, dirty files. Best-effort, 2s timeout, empty dict on non-repo. |
+| `parse_transcript_tail(path)` | `rough_task` (last user message), `edited_files` (Edit/Write/NotebookEdit tool_use), `last_error` (tool_result error text) from the tail. |
+| `ResumeDoc` | Load / render / write the resume Markdown, with a `.prev` backup. |
+| `capture_rolling(cwd, transcript)` | No-LLM refresh (UserPromptSubmit path). |
+| `build_resume_llm(cwd, transcript)` | LLM refresh (PreCompact path) + `_run_claude` with the `WWI_MODEL` override. |
+| `render_session_start(cwd)` | Build the banner/context block; git refreshed live; first-session fallback. |
+| `resume_path_for(cwd)` | Map a cwd to its slugged resume path under `~/.claude/wherewasi/resume/`. |
+| hooks + `main()` | JSON-in/JSON-out hook handlers and the `show` / `--reset` CLI. |
 
 ## Design principles
 
-1. **Near-zero ambient cost** — ~350 tokens injected at SessionStart. LLM work is offloaded to a detached subprocess that runs between sessions.
-2. **100% local** — no external services, no API keys. LLM calls go through `claude --print` using the user's existing Claude Code auth.
-3. **Tool-result signal over regex** — error detection relies on Claude Code's `is_error=true` on tool results, not text heuristics. Fewer false positives, zero regex maintenance.
-4. **Dedup by default** — MD5 content hash prevents duplicate facts across sessions.
-5. **Topic-keyed upsert** — `UNIQUE(topic)` on `memories`. Same topic = one row, latest wins. No contradictions, no merge logic.
-6. **Durable vs ephemeral** — preferences persist indefinitely; project state expires in 7 days. Ephemeral memories are scoped to the current `cwd`.
-7. **Collision absorber, not coordination** — two PreCompact hooks racing on the same session are absorbed by `PRAGMA busy_timeout=5000` + `UNIQUE(topic)`. No lockfile, no coordinator. Cost: occasional redundant Sonnet call.
-8. **Schema baseline stamped at `user_version=1`** — columns live in `CREATE TABLE IF NOT EXISTS`. Future typed constraints hook into a `PRAGMA user_version` migration ladder.
-9. **Advisory skills** — `/reflect` consolidates memory (writes) and proposes CLAUDE.md rules (advisory). CLAUDE.md is never auto-written.
-10. **Idempotent install** — re-running `install.sh` strips legacy `.sh` hook entries from `settings.json`, reinstalls the unified `engram.py` hooks, and removes any leftover pattern wiki from older installs. `memory.db` is preserved.
+1. **One job, done well.** Show the last task + next step when you reopen a project. No
+   search, no recall, no knowledge base.
+2. **Near-zero ambient cost.** ~120 tokens injected at SessionStart, read from a file. The
+   only LLM work is one `claude --print` call on compaction.
+3. **Files, not a database.** One Markdown file per project. No SQLite, no schema, no
+   migrations, no FTS. Trivial to inspect (`cat`), trivial to reset (`rm`).
+4. **Best-effort, never blocks.** Every hook degrades silently: git failure → omit git
+   fields; no transcript → minimal resume; LLM failure / `WWI_SKIP_LLM=1` → carry the prior
+   narrative; IO failure → the `.prev` backup guards against a half-written file.
+5. **Replace semantics.** The resume always reflects the current state; no history
+   accumulates and nothing goes stale.
+6. **Live git at display time.** The narrative is cached; git is rebuilt on every render, so
+   the banner is accurate even if commits/dirty state drifted since the last capture.
+7. **100% local.** No external services, no API keys. The LLM call goes through
+   `claude --print` using your existing Claude Code auth.
 
-## Why one entrypoint
+## Why one file
 
-The v0.1 architecture had 4-5 shell scripts calling individual Python modules. v1 collapsed that to `engram.py` with argparse subcommands. The hooks just invoke `engram.py on-precompact` / `engram.py on-session-start` / `engram.py on-user-prompt`; everything else (capture, digest dispatch, snapshot dispatch, executive merge, banner) is regular Python inside one process.
-
-This trades a tiny bit of startup time for a simpler mental model, a single place to debug, and no shell-quoting landmines when user settings paths contain spaces.
-
-## Why the executive cache
-
-Claude Code emits its own `※ recap` (one-line summary of the current session, stored as `type:system, subtype:away_summary` in the session JSONL). engram extracts the latest recap matching the current `cwd`, merges it with its own inject_context, `memdoctor` friction signals, and git state, and asks Sonnet for a **3-bullet summary** (`status` / `last change` / `next`). The merge happens between sessions (PreCompact or every `ENGRAM_DIGEST_EVERY` prompts, default 25) so SessionStart stays latency-free.
-
-The `next:` bullet prioritizes friction signals when present (e.g. if memdoctor flags an error-loop, `next:` addresses it before feature work). Inputs grow over time (more memories, newer recap, new signals); the output stays 3 bullets. Sonnet re-compresses from scratch each rebuild — no stale bullets accumulate. If a rebuild compresses badly, `engram preview --prev` prints the rotated previous cache.
+The whole surface is small: read git, read the transcript tail, render a Markdown block,
+wire three hooks. Collapsing it into a single `wherewasi.py` (vs. the multi-file
+`engram.py` + `memcapture.py` + `memdoctor.py` it replaced) means one place to read, one
+place to debug, and no import graph to hold in your head.

@@ -1,65 +1,72 @@
 # Privacy Policy
 
-**claude-engram** — Persistent memory for Claude Code sessions
+**WhereWasI** — Per-project resume for Claude Code sessions
 
 Author: Sebastian Breguel
 License: MIT
-Last updated: 2026-04-16
+Last updated: 2026-05-28
 
 ---
 
 ## Summary
 
-claude-engram is a 100% local plugin. All data stays on your machine. Nothing is sent to external servers.
+WhereWasI is a local plugin. All data stays on your machine in plain Markdown files.
+Nothing is sent to external servers except a single LLM call (see below) that runs through
+your own Claude Code login.
 
 ## What is stored
 
-claude-engram captures the following data, stored locally on disk:
+WhereWasI keeps one Markdown file per project at `~/.claude/wherewasi/resume/<slug>.md`
+(plus a `.prev` backup). It contains:
 
-- **Session metadata** — project name, git branch, topic, timestamps
-- **File paths** — paths of files touched during a session (not file content)
-- **Tool usage counts** — which Claude Code tools were invoked and how often
-- **Error strings** — error messages encountered during sessions
-- **Atomic memories** — LLM-extracted preferences, practices, and project state
-
-All structured data is stored in `~/.claude/memory.db` (SQLite).
+- **Project name and git context** — branch, uncommitted count, recent commit hashes/subjects, dirty file paths
+- **Edited files** — paths of files touched (from `Edit`/`Write`/`NotebookEdit` in the transcript tail), not their content
+- **Last error string** — the most recent error message seen in the transcript tail (truncated)
+- **`Último` / `Sigue`** — two LLM-written sentences: the last task and the next step
 
 ## What is NOT stored
 
 - Full conversation transcripts
 - Source code or file content
 - Secrets, API keys, or values from `.env` files
-- Credentials of any kind
+- Any history — the resume is replaced on each write, never appended
 
 ## Network activity
 
-claude-engram makes **zero network requests**. There is no telemetry, no analytics, no tracking, and no phoning home.
+WhereWasI makes **zero network requests** of its own. No telemetry, no analytics, no
+tracking.
 
-The only LLM interaction is through `claude --print --model claude-sonnet-4-6`, invoked in the background on compaction and every `ENGRAM_DIGEST_EVERY` prompts (default 25). It runs locally through your own Claude Code session and uses whatever model and billing you already have configured. No separate API keys are required. Set `ENGRAM_SKIP_LLM=1` to disable.
+The only LLM interaction is `claude --print --model claude-sonnet-4-6`, invoked **on
+compaction only**. It reads the **tail of the current transcript** (last ~12 KB) and
+returns two lines (last task / next step). It runs locally through your own Claude Code
+session and uses whatever model and billing you already have configured — **no separate
+API key**. Set `WWI_SKIP_LLM=1` to disable it entirely; the resume still refreshes from git
+on the rolling path. Override the model with `WWI_MODEL` (set empty for your account
+default).
 
 ## Third-party services
 
-None. claude-engram has no external dependencies, no cloud backend, and no third-party integrations.
+None. WhereWasI has no external dependencies (Python stdlib only), no cloud backend, and no
+third-party integrations.
 
 ## Data control
 
 Your data is yours. You can:
 
-- **Inspect** it at any time: `sqlite3 ~/.claude/memory.db`
-- **Delete** specific memories through the plugin's CLI tools
-- **Uninstall** cleanly by running `./uninstall.sh`, which removes tools and hooks
-- **Delete all data** by removing `~/.claude/memory.db` manually
-
-Note: `uninstall.sh` preserves `memory.db` by default so you don't lose your memories if you reinstall. Delete it manually if you want a full wipe.
+- **Inspect** it any time: `cat ~/.claude/wherewasi/resume/<slug>.md`
+- **Clear** a project's resume: `python3 ~/.claude/tools/wherewasi.py --reset --cwd "$PWD"` (or `/wherewasi --reset`)
+- **Delete all** resume data: `rm -rf ~/.claude/wherewasi/`
+- **Uninstall** cleanly: `./uninstall.sh` removes the tool, hooks, all resume data, and any legacy engram data
 
 ## Children's privacy
 
-claude-engram is a developer tool. It is not directed at children under 13.
+WhereWasI is a developer tool. It is not directed at children under 13.
 
 ## Changes to this policy
 
-Updates will be posted in this file within the repository. No retroactive changes to data handling will be made without a new release.
+Updates will be posted in this file within the repository. No retroactive changes to data
+handling will be made without a new release.
 
 ## Contact
 
-For questions about this policy, open an issue on the [GitHub repository](https://github.com/sebastianbreguel/claude-engram) or contact Sebastian Breguel directly.
+For questions about this policy, open an issue on the [GitHub repository](https://github.com/sebastianbreguel/wherewasi) or contact Sebastian Breguel directly.

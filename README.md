@@ -1,182 +1,108 @@
-# Claude-engram
+# WhereWasI
 
-[![tests](https://img.shields.io/github/actions/workflow/status/sebastianbreguel/claude-engram/test.yml?branch=main&label=tests&style=flat)](https://github.com/sebastianbreguel/claude-engram/actions/workflows/test.yml) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?style=flat)](https://www.python.org/) [![license](https://img.shields.io/github/license/sebastianbreguel/claude-engram?style=flat)](LICENSE)
+[![tests](https://img.shields.io/github/actions/workflow/status/sebastianbreguel/wherewasi/test.yml?branch=main&label=tests&style=flat)](https://github.com/sebastianbreguel/wherewasi/actions/workflows/test.yml) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?style=flat)](https://www.python.org/) [![license](https://img.shields.io/github/license/sebastianbreguel/wherewasi?style=flat)](LICENSE)
 
-**Claude forgets everything between sessions.** Your preferences, your project state, where you left off — gone the moment you close the terminal.
+**Claude forgets everything between sessions.** What you were doing, what's next, what broke — gone the moment you close the terminal.
 
-claude-engram fixes that. Open Claude Code tomorrow and it already knows where you left off — what you decided, what broke, what's next. Per-project, automatic, no config.
+WhereWasI fixes that one thing well. Open a project tomorrow and the first thing you see is *the last task you were on and the next step* — so you pick up immediately. Per-project, automatic, no config.
 
-![claude-engram warm start demo](demo/readme-hero-focus.gif)
+This is **not** a memory bank. No search, no recall by topic, no accumulated history. Just the current state, to the point.
 
 ## What you see
 
-When you open Claude Code, claude-engram injects a 3-bullet executive summary from your last session:
+When you open Claude Code in a project, WhereWasI injects a short resume at the top of the session:
 
 ```
-- status: claude-engram MVP+D2 completo, 79 tests passing
-- last change: D2 error-loop enrichment con memory.db cross-reference
-- next: fix install.sh memdoctor → translate EXEC_PROMPT → docs
+# where was i: wherewasi  ·  branch wherewasi-v2
+
+Último: Rewriting docs for the resume pivot (README + architecture).
+Sigue: Run the full test suite + ruff, then deploy with install.sh.
+
+Repo: wherewasi-v2 · 3 sin commitear · último: a1b2c3d docs rewrite
+Archivos: README.md, docs/architecture.md
+Último error: ninguno
 ```
 
-Three bullets, zero latency. The merge (recap + memory) happens in the background *between* sessions, so opening is instant.
-
-## What it remembers
-
-| | What | Example | Lifetime |
-|---|---|---|---|
-| **Handoffs** | Where you left off | *"Refactoring auth to JWT; signup still on old sessions"* | 7 days |
-| **Preferences** | How you like to work | *"uses uv, not pip · responds in Spanish"* | Forever |
-
-Handoffs and preferences inject automatically on every session start.
+Two load-bearing lines — **Último** (last task) and **Sigue** (next step) — plus cheap git context. Zero latency: it's read from a file, no LLM call at open.
 
 ## How it works
 
-claude-engram has two jobs: **remember** and **inject**.
+WhereWasI is **files + hooks. No database.** One Markdown file per project at `~/.claude/wherewasi/resume/<project>.md`, refreshed two ways:
 
-1. **While you work** — two triggers capture state:
-   - **Every 25 prompts** (UserPromptSubmit) — mid-session digest fires a background LLM pass to update memories.
-   - **On compaction** (PreCompact) — transcript → SQLite; digest + snapshot; executive summary rebuild.
-2. **Between sessions** — Sonnet merges Claude Code's own `※ recap` with engram's memories into a 3-bullet executive summary, cached per project.
-3. **On session start** — the cached executive is injected (zero latency). Falls back to ~350-token inject if the cache is missing.
+1. **Every 25 prompts** (`UserPromptSubmit`, **no LLM**) — a cheap refresh of the git fields (branch, uncommitted count, last commit, dirty files) and transcript tail (edited files, last error). Your `Último`/`Sigue` narrative is preserved.
+2. **On compaction** (`PreCompact`, **LLM**) — `claude --print` reads the transcript tail and rewrites `Último` + `Sigue` from what you were actually doing.
+3. **On session start** (`SessionStart`) — the resume file is read and injected (with git refreshed live). First time in a project? You get a minimal git-derived resume so you never open blank.
 
-That's the core. No config, no commands to run. It works while you work.
+Replace semantics: the file always reflects the current state. No history accumulates.
 
 ## Install
 
-**Requirements:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [uv](https://docs.astral.sh/uv/)
+**Requirements:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), `python3` (stdlib only — no `uv`, no pip, no deps).
 
 **As a Claude Code plugin (recommended):**
 
 ```bash
 # In Claude Code:
-/plugin install claude-engram@sebastianbreguel/claude-engram
+/plugin install wherewasi@sebastianbreguel/wherewasi
 ```
 
 **Or clone and run the installer:**
 
 ```bash
-git clone https://github.com/sebastianbreguel/claude-engram.git
-cd claude-engram && ./install.sh
+git clone https://github.com/sebastianbreguel/wherewasi.git
+cd wherewasi && ./install.sh
 ```
 
-> **First session:** claude-engram captures silently — nothing visible yet.
-> **Session 2 onward:** the 3-bullet recap appears at the top of the conversation.
+> **First session in a project:** you get a minimal git-only resume.
+> **After you've worked a bit:** the resume fills in with your last task + next step.
 
 ```bash
-# Uninstall (keeps your memory.db data)
-cd claude-engram && ./uninstall.sh
+# Uninstall (also cleans up legacy engram data, if any)
+cd wherewasi && ./uninstall.sh
 ```
 
-## Why not built-in memory?
+## Commands
 
-Claude Code has auto-memory (`MEMORY.md`) — it stores what you explicitly tell it to remember. claude-engram watches what you *actually do*: it extracts decisions, errors, preferences, and project state from every session automatically. It scopes memories per project and rebuilds a structured executive summary so your next session starts exactly where you left off — without you lifting a finger.
+```bash
+python3 ~/.claude/tools/wherewasi.py --cwd "$PWD"          # print this project's resume
+python3 ~/.claude/tools/wherewasi.py --reset --cwd "$PWD"  # clear this project's resume
+```
 
-## How it compares
-
-| | claude-engram | claude-mem | OpenMemory | cortex |
-|---|---|---|---|---|
-| Ambient token cost | **~350** | ~2K+ | ~1K+ (MCP) | ~3K (27 tools) |
-| External services | None | Agent SDK worker | Docker + MCP server | MCP server |
-| API keys required | No | Yes | No | No |
-| Runtime | Python + SQLite | Node worker | Docker | Rust binary |
-| Install | `./install.sh` | npm + worker | docker compose | cargo |
+Or use the slash command: `/wherewasi` (show) · `/wherewasi --reset` (clear).
 
 ## Privacy and transparency
 
-Everything lives in `~/.claude/memory.db` (SQLite). Nothing leaves your machine.
+Everything lives in `~/.claude/wherewasi/resume/<project>.md` (plain Markdown). Nothing leaves your machine except the one LLM call below.
 
-- **Captured**: session metadata, files touched, tool usage, error strings, and LLM-extracted memories.
-- **NOT captured**: no full transcripts, no code content, no secrets from `.env`.
-- **LLM calls**: `claude --print` (Sonnet 4.6) on compaction + every 25 prompts (~2-5K tokens each, local to your session). No external API calls.
-- **Uninstall**: `./uninstall.sh` removes tools and hooks. Your data is preserved unless you delete it.
+- **Stored**: project name, git branch/commit/dirty-file list, the edited-files list and last-error string from the transcript tail, and the LLM-written `Último`/`Sigue` lines.
+- **NOT stored**: no full transcripts, no source code, no secrets from `.env`.
+- **LLM calls**: only on compaction, `claude --print` (default Sonnet 4.6 — override with `WWI_MODEL`, or set it empty for your account default) reads the **tail of the transcript** to write two lines. It runs under your existing Claude Code login — **no separate API key**. Set `WWI_SKIP_LLM=1` to disable it entirely (the resume still refreshes from git on the rolling path). Note: from **2026-06-15**, `claude -p` on subscription plans (Pro/Max/Team/Enterprise) draws from a monthly [Agent SDK credit](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) you claim once. If it runs out, the LLM rewrite pauses but the rolling git refresh and session-start display keep working.
 
-## CLI
+## Environment variables
 
-```bash
-uv run ~/.claude/tools/engram.py --version          # print installed version
-uv run ~/.claude/tools/engram.py verify-install     # check repo ↔ ~/.claude/tools in sync
-uv run ~/.claude/tools/engram.py stats              # what claude-engram knows
-uv run ~/.claude/tools/engram.py memories           # list learned memories
-uv run ~/.claude/tools/engram.py forget "topic"     # delete one memory
-uv run ~/.claude/tools/engram.py forget --expired --dry-run   # preview stale-ephemeral cleanup (>7d)
-uv run ~/.claude/tools/engram.py forget --project X --dry-run # preview project-scoped cleanup
-uv run ~/.claude/tools/engram.py search <query>     # FTS5 search over captured facts
-uv run ~/.claude/tools/engram.py doctor             # friction signals (correction-heavy, error-loop, ...)
-uv run ~/.claude/tools/engram.py preview            # current executive summary
-uv run ~/.claude/tools/engram.py preview --prev     # rotated previous summary (safety net)
-uv run ~/.claude/tools/engram.py log --tail 20      # tail background LLM failures
-```
-
-Full reference: [docs/cli-reference.md](docs/cli-reference.md).
-
-## Per-project scoping
-
-claude-engram injects memories scoped to where you are:
-
-- **Durable** (preferences, practices) — global, appear in any project
-- **Ephemeral** (project state, handoffs) — scoped to the current project's cwd
-- **Snapshots** — the last work-state snapshot, injected only for the matching project
-
-Open `vambe-datascience` and you get vambe context. Switch to `claude-engram` and you get claude-engram context.
-
-## Architecture
-
-```
-                              Claude Code hooks
-            ┌──────────────────┬──────────────────┬───────────────────┐
-            │  PreCompact      │  UserPromptSubmit│   SessionStart    │
-            └────────┬─────────┴─────────┬────────┴─────────┬─────────┘
-                     │                   │ (every 25)       │
-                     ▼                   ▼                  ▼
-            engram.py on-precompact  on-user-prompt   on-session-start
-                     │                   │                  │
-          ┌──────────┴──────────┐        │                  │
-          ▼                     ▼        ▼                  ▼
-       [sync]              [async×3]  [async×2]         [sync read]
-     memcapture            Sonnet 4.6  digest           executive
-                          ┌────────┐  + executive       cache read
-                          │digest  │                    (~90 chars)
-                          │snapshot│                       │
-                          │executive│                      ▼
-                          └────┬───┘                  additionalContext
-                               │                      (invisible) +
-                               ▼                      systemMessage
-             ┌──────────────────────────┐            (banner)
-             │       memory.db          │
-             │  sessions, facts,        │
-             │  memories (topic UPSERT) │
-             │  compactions, files,     │
-             │  tool_usage, facts_fts   │
-             └──────────────────────────┘
-             ┌──────────────────────────┐
-             │  ~/.claude/engram/       │  executive cache
-             │      executive/<slug>.md │  (one per project)
-             └──────────────────────────┘
-```
-
-**Data flow:**
-- **PreCompact:** transcript → SQLite (sync) → 3 detached Sonnet subprocesses (digest + snapshot + executive)
-- **UserPromptSubmit:** counter++; every 25 prompts → mid-session digest + executive rebuild (both fire-and-forget)
-- **SessionStart:** read cached executive (`<cwd-slug>.md`) → inject as `additionalContext`. Falls back to full `memcapture --inject` + banner if cache is missing.
-- **Concurrency:** no locks — `PRAGMA busy_timeout=5000` + `UNIQUE(topic)` absorb races; executive cache is overwrite-only.
-
-**Files (3 Python, 0 external deps):**
-
-| File | Lines | Role |
+| Variable | Default | Effect |
 |---|---|---|
-| `engram.py` | ~900 | CLI + hook orchestrator, Sonnet dispatch, prompt templates, executive cache |
-| `memcapture.py` | ~1,200 | JSONL parser, SQLite schema, inject builder, FTS5 search |
-| `memdoctor.py` | ~540 | Friction signal detector (correction-heavy, error-loop, restart-cluster, ...) |
+| `WWI_SHOW_BANNER` | `1` | Set to `0` to suppress the visible banner (context still injects) |
+| `WWI_SKIP_LLM` | unset | Set to `1` to skip the compaction LLM call (resume still refreshes from git) |
+| `WWI_MODEL` | `claude-sonnet-4-6` | Model for the LLM rewrite. Set empty to use your account default |
+| `WWI_DIGEST_EVERY` | `25` | Rolling-refresh cadence (prompts per `UserPromptSubmit` refresh) |
 
-## At a glance
+## How it compares
 
-![claude-engram — session memory for Claude Code](docs/claude-engram-explainer.svg)
+| | WhereWasI | claude-mem | OpenMemory | cortex |
+|---|---|---|---|---|
+| Ambient token cost | **~120** | ~2K+ | ~1K+ (MCP) | ~3K (27 tools) |
+| External services | None | Agent SDK worker | Docker + MCP server | MCP server |
+| API keys required | No | Yes | No | No |
+| Runtime | Python (stdlib) | Node worker | Docker | Rust binary |
+| Storage | One MD file/project | SQLite + worker | Docker volume | Rust store |
+| Install | `./install.sh` | npm + worker | docker compose | cargo |
 
 ## Docs
 
-- [CLI Reference](docs/cli-reference.md) — all commands, token budget, manual install, experimental features
-- [Architecture](docs/architecture.md) — file layout, SQLite schema, design principles
-- [Privacy Policy](docs/privacy.md) — what's captured, what's not, zero network activity
+- [Architecture](docs/architecture.md) — files + hooks, the resume file, capture flow
+- [CLI Reference](docs/cli-reference.md) — commands, hooks, environment variables
+- [Privacy Policy](docs/privacy.md) — what's stored, what's not, network activity
 
 ## License
 

@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.0 — WhereWasI (2026-05-28)
+
+**Breaking: renamed from `claude-engram` to `wherewasi` and pivoted from a generalized
+memory bank to a per-project resume tool.** One break, clean identity.
+
+### Changed
+- **Identity:** the plugin now does one thing — show *the last task you were on and the next
+  step* when you reopen a project. No search, no recall by topic, no accumulated history.
+- **Storage:** files, not a database. One Markdown resume per project at
+  `~/.claude/wherewasi/resume/<slug>.md` (replace semantics, `.prev` backup). Dropped
+  SQLite (`memory.db`), the schema/migrations, and FTS5 entirely.
+- **One file:** the whole plugin is `tools/wherewasi.py` (stdlib only), replacing
+  `engram.py` + `memcapture.py` + `memdoctor.py`.
+- **Runtime:** hooks run via `python3` (no `uv` required at runtime).
+- **Capture:** rolling refresh every 25 prompts (`UserPromptSubmit`, no LLM) + an LLM
+  rewrite of `Último`/`Sigue` on compaction (`PreCompact`). SessionStart reads the file and
+  refreshes git live — zero LLM at open.
+- **Env vars:** `ENGRAM_*` → `WWI_*` (`WWI_MODEL`, `WWI_SKIP_LLM`, `WWI_DIGEST_EVERY`,
+  `WWI_SHOW_BANNER`).
+- **Command:** `/engram-reset` → `/wherewasi` (show) + `/wherewasi --reset` (clear).
+
+### Removed
+- The entire memory machinery: `memories`/`facts`/`facts_fts` tables, query-aware recall,
+  LLM memory extraction (digest → memories), durable preferences, friction signals
+  (`memdoctor`), the correction eval harness, and the `/reflect` skill.
+
+### Migration
+- Old `~/.claude/memory.db` and `~/.claude/engram/` are **no longer read** by anything
+  (left untouched on upgrade — non-destructive). `uninstall.sh` removes both the legacy
+  engram data and WhereWasI's files. Re-run `./install.sh` to swap the `engram.py` hooks
+  for the `wherewasi.py` hooks in `settings.json`.
+
+---
+
+## engram (pre-pivot, historical)
+
+_The entries below predate the rename and describe the old generalized-memory plugin. Kept
+for history; none of this machinery ships in WhereWasI 0.1.0._
+
 ## Unreleased
 
 ### Changed
