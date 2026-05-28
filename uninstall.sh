@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
-# claude-engram uninstaller
-# Removes tools, skills, and hook registrations. Does NOT delete memory.db (your data).
+# WhereWasI uninstaller
+# Removes the tool, the slash command, and hook registrations.
+# Also cleans up legacy engram data (memory.db, engram/ cache) from older installs.
 
 set -euo pipefail
 
 CLAUDE_DIR="$HOME/.claude"
 
-echo "claude-engram uninstaller"
+echo "WhereWasI uninstaller"
 echo "================================"
 echo ""
 
 echo "[1/3] Removing files..."
-rm -f "$CLAUDE_DIR/tools/engram.py"
-rm -f "$CLAUDE_DIR/tools/memcapture.py"
-rm -f "$CLAUDE_DIR/tools/memcompile.py"
-rm -f "$CLAUDE_DIR/tools/mempatterns.py"
-rm -f "$CLAUDE_DIR/tools/memdoctor.py"
-rm -f "$CLAUDE_DIR/tools/memdashboard.py"  # legacy, may not exist
-# Legacy shell hooks (v0.1) — remove if present from older installs
-rm -f "$CLAUDE_DIR/hooks/memcapture-hook.sh"
-rm -f "$CLAUDE_DIR/hooks/memcapture-inject.sh"
-rm -f "$CLAUDE_DIR/hooks/memdigest-hook.sh"
-rm -f "$CLAUDE_DIR/hooks/memcompact-hook.sh"
-rm -f "$CLAUDE_DIR/hooks/mempatterns-hook.sh"
-rm -rf "$CLAUDE_DIR/skills/reflect"
-rm -rf "$CLAUDE_DIR/skills/patterns"  # legacy, may not exist
-rm -rf "$CLAUDE_DIR/patterns"  # legacy pattern wiki (removed in pre-launch)
-echo "  Removed tools and skills."
+rm -f "$CLAUDE_DIR/tools/wherewasi.py"
+rm -f "$CLAUDE_DIR/commands/wherewasi.md"
+# WhereWasI resume data + counter
+rm -rf "$CLAUDE_DIR/wherewasi"
+rm -f "$CLAUDE_DIR/.wherewasi-prompt-count"
+# Legacy engram artifacts (tools, skills, data) from older installs
+rm -f "$CLAUDE_DIR/tools/engram.py" \
+      "$CLAUDE_DIR/tools/memcapture.py" \
+      "$CLAUDE_DIR/tools/memdoctor.py" \
+      "$CLAUDE_DIR/tools/eval_corrections.py" \
+      "$CLAUDE_DIR/tools/eval_warmstart.py" \
+      "$CLAUDE_DIR/tools/mempatterns.py" \
+      "$CLAUDE_DIR/commands/engram-reset.md" \
+      "$CLAUDE_DIR/memory.db" \
+      "$CLAUDE_DIR/.engram-prompt-count"
+rm -rf "$CLAUDE_DIR/engram" "$CLAUDE_DIR/skills/reflect"
+echo "  Removed tools, command, resume data, and legacy engram data."
 
 echo "[2/3] Removing hook configuration..."
 python3 << 'PYEOF'
@@ -40,13 +42,13 @@ if not settings_path.exists():
 settings = json.loads(settings_path.read_text())
 hooks = settings.get("hooks", {})
 
-ENGRAM_MARKERS = ("engram.py", "memcapture", "memdigest", "memcompact", "mempatterns")
+MARKERS = ("wherewasi.py", "engram.py", "memcapture", "memdigest", "memcompact", "mempatterns")
 
 
 def strip(event_name):
     event = hooks.get(event_name, [])
     for entry in event:
-        entry["hooks"] = [h for h in entry.get("hooks", []) if not any(m in h.get("command", "") for m in ENGRAM_MARKERS)]
+        entry["hooks"] = [h for h in entry.get("hooks", []) if not any(m in h.get("command", "") for m in MARKERS)]
     hooks[event_name] = [e for e in event if e.get("hooks")]
     if not hooks[event_name]:
         del hooks[event_name]
@@ -60,6 +62,3 @@ print("  Hooks removed from settings.json")
 PYEOF
 
 echo "[3/3] Done."
-echo ""
-echo "Note: ~/.claude/memory.db was NOT deleted (contains your session history)."
-echo "To delete it: rm ~/.claude/memory.db"

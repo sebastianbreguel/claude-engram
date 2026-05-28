@@ -1,19 +1,19 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "claude-engram",
-  "description": "Persistent memory for Claude Code: per-project handoff notes and learned preferences.",
+  "name": "wherewasi",
+  "description": "Pick up exactly where you left off. Per-project resume of your last task + next step.",
   "owner": {
     "name": "sebastianbreguel",
     "email": "breguelsebastian@gmail.com"
   },
   "plugins": [
     {
-      "name": "claude-engram",
-      "description": "Persistent memory for Claude Code: per-project handoff notes and learned preferences. ~350 tokens ambient cost, no Docker, no API keys, no MCP.",
+      "name": "wherewasi",
+      "description": "Pick up exactly where you left off. Per-project resume of your last task + next step. No DB, no API keys, no MCP.",
       "version": "0.1.0",
       "category": "developer-tools",
       "source": "./",
-      "homepage": "https://github.com/sebastianbreguel/claude-engram",
+      "homepage": "https://github.com/sebastianbreguel/wherewasi",
       "strict": false
     }
   ]
