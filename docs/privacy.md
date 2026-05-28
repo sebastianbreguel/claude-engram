@@ -19,9 +19,7 @@ your own Claude Code login.
 WhereWasI keeps one Markdown file per project at `~/.claude/wherewasi/resume/<slug>.md`
 (plus a `.prev` backup). It contains:
 
-- **Project name and git context** — branch, uncommitted count, recent commit hashes/subjects, dirty file paths
-- **Edited files** — paths of files touched (from `Edit`/`Write`/`NotebookEdit` in the transcript tail), not their content
-- **Last error string** — the most recent error message seen in the transcript tail (truncated)
+- **Project name and git context** — branch, uncommitted count, the last commit hash/subject
 - **`Last` / `Next`** — two LLM-written sentences: the last task and the next step
 
 ## What is NOT stored

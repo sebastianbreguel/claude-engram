@@ -49,7 +49,7 @@ def test_render_first_session_no_file_uses_git(monkeypatch, tmp_path):
     assert "branch dev" in out
 
 
-_PLAIN = "# where was i: proj  ·  branch main\n\nLast: doing X\nNext: do Y\n\nRepo: main · 0 uncommitted · last: abc\nLast error: none\n"
+_PLAIN = "# where was i: proj  ·  branch main\n\nLast: doing X\nNext: do Y\n\n2 uncommitted · abc fix\n"
 
 
 def test_colorize_banner_adds_ansi(monkeypatch):

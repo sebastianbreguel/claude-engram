@@ -37,57 +37,27 @@ def build_git_context(cwd: str) -> dict:
     }
 
 
-_EDIT_TOOLS = {"Edit", "Write", "NotebookEdit"}
 _TAIL_LINES = 400  # cap how far back we scan
 
 
-def _text_of(content) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "text":
-                parts.append(b.get("text", ""))
-        return " ".join(parts)
-    return ""
-
-
 def parse_transcript_tail(transcript_path: Path) -> dict:
-    """Pull a rough task (last substantive user msg), edited files, and last error
-    from the tail of a transcript JSONL. Best-effort; empty fields on any failure."""
-    empty = {"rough_task": "", "edited_files": [], "last_error": ""}
+    """Pull a rough task (the last substantive user message) from the tail of a transcript
+    JSONL. Used only as a fallback for `Last` when there is no LLM narrative yet.
+    Best-effort; empty on any failure."""
     try:
         lines = Path(transcript_path).read_text(errors="ignore").splitlines()[-_TAIL_LINES:]
     except Exception:
-        return empty
-
+        return {"rough_task": ""}
     rough_task = ""
-    edited: list[str] = []
-    last_error = ""
     for ln in lines:
         try:
             obj = json.loads(ln)
         except Exception:
             continue
-        msg = obj.get("message", {})
-        content = msg.get("content")
+        content = obj.get("message", {}).get("content")
         if obj.get("type") == "user" and isinstance(content, str) and content.strip():
             rough_task = content.strip()[:200]  # latest wins
-        if obj.get("type") == "assistant" and isinstance(content, list):
-            for b in content:
-                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") in _EDIT_TOOLS:
-                    fp = (b.get("input") or {}).get("file_path")
-                    if fp and fp not in edited:
-                        edited.append(fp)
-        if isinstance(content, list):
-            for b in content:
-                # Trust Claude Code's structured is_error flag, not keyword sniffing:
-                # normal coding output ("0 errors", "Found 1 error", grep hits) is full of
-                # the word "error" and would constantly false-positive. Latest failure wins.
-                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
-                    last_error = _text_of(b.get("content")).strip()[:200]
-    return {"rough_task": rough_task, "edited_files": edited[-10:], "last_error": last_error}
+    return {"rough_task": rough_task}
 
 
 class ResumeDoc:
@@ -95,39 +65,34 @@ class ResumeDoc:
     `Last`/`Next` (LLM narrative) are passed in by the caller; rolling captures
     preserve them by loading the prior doc and passing its values back in."""
 
-    def __init__(
-        self,
-        project: str,
-        task: str,
-        next_step: str,
-        git: dict,
-        last_error: str = "none",
-        edited_files: list[str] | None = None,
-    ):
+    def __init__(self, project: str, task: str, next_step: str, git: dict):
         self.project = project
         self.task = (task or "").strip()
         self.next_step = (next_step or "").strip()
         self.git = git or {}
-        self.last_error = (last_error or "none").strip()
-        self.edited_files = edited_files or []
 
     def render(self) -> str:
+        """Lean banner: the two narrative lines are the hero (Last = where you were,
+        Next = what to do), with one compact git line for grounding. No file list, no
+        last-error echo — the dev has `git` for that; padding it dilutes the two lines
+        that actually carry intent."""
         g = self.git
-        branch = g.get("branch") or "?"
-        commits = g.get("commits") or []
-        last_commit = commits[0] if commits else "—"
-        files = ", ".join(dict.fromkeys((g.get("dirty_files") or []) + self.edited_files))[:300]
+        branch = g.get("branch")
+        head = f"# where was i: {self.project}"
+        if branch:
+            head += f"  ·  branch {branch}"
         lines = [
-            f"# where was i: {self.project}  ·  branch {branch}",
+            head,
             "",
             f"Last: {self.task or '(no task recorded)'}",
             f"Next: {self.next_step or '(no next step)'}",
-            "",
-            f"Repo: {branch} · {g.get('uncommitted', 0)} uncommitted · last: {last_commit}",
         ]
-        if files:
-            lines.append(f"Files: {files}")
-        lines.append(f"Last error: {self.last_error or 'none'}")
+        if branch:
+            commits = g.get("commits") or []
+            detail = f"{g.get('uncommitted', 0)} uncommitted" if g.get("uncommitted", 0) else "clean"
+            if commits:
+                detail += f" · {commits[0]}"
+            lines += ["", detail]
         return "\n".join(lines) + "\n"
 
     def write(self, path: Path) -> None:
@@ -154,13 +119,7 @@ class ResumeDoc:
         m = re.search(r"^# where was i:\s*([^·]+)", text, re.MULTILINE)
         if m:
             proj = m.group(1).strip()
-        return cls(
-            project=proj,
-            task=_field("Last"),
-            next_step=_field("Next"),
-            git={},
-            last_error=_field("Last error"),
-        )
+        return cls(project=proj, task=_field("Last"), next_step=_field("Next"), git={})
 
 
 def resume_path_for(cwd: str) -> Path:
@@ -176,20 +135,13 @@ def capture_rolling(cwd: str, transcript: Path | None) -> None:
     """No-LLM refresh: fresh git + transcript-tail fields, preserving prior narrative."""
     path = resume_path_for(cwd)
     git = build_git_context(cwd)
-    tail = parse_transcript_tail(transcript) if transcript else {"rough_task": "", "edited_files": [], "last_error": ""}
+    tail = parse_transcript_tail(transcript) if transcript else {"rough_task": ""}
     prev_task = prev_next = ""
     if path.exists():
         prev = ResumeDoc.load(path)
         prev_task, prev_next = prev.task, prev.next_step
     task = prev_task or tail["rough_task"]  # keep LLM narrative if present
-    ResumeDoc(
-        project=_project_name(cwd),
-        task=task,
-        next_step=prev_next,
-        git=git,
-        last_error=tail["last_error"] or "none",
-        edited_files=tail["edited_files"],
-    ).write(path)
+    ResumeDoc(project=_project_name(cwd), task=task, next_step=prev_next, git=git).write(path)
 
 
 def render_session_start(cwd: str) -> str:
@@ -199,7 +151,7 @@ def render_session_start(cwd: str) -> str:
     git = build_git_context(cwd)
     if path.exists():
         try:
-            doc = ResumeDoc.load(path)  # narrative (Last/Next/error) from disk
+            doc = ResumeDoc.load(path)  # narrative (Last/Next) from disk
             doc.git = git  # refresh git live
             doc.project = _project_name(cwd)  # authoritative; avoids `·`-truncation from load
             return doc.render()
@@ -250,7 +202,7 @@ def build_resume_llm(cwd: str, transcript: Path | None) -> None:
     """Compaction path: LLM polishes task/next_step. On skip/failure, carry prior narrative."""
     path = resume_path_for(cwd)
     git = build_git_context(cwd)
-    tail = parse_transcript_tail(transcript) if transcript else {"rough_task": "", "edited_files": [], "last_error": ""}
+    tail = parse_transcript_tail(transcript) if transcript else {"rough_task": ""}
     prev_task = prev_next = ""
     if path.exists():
         prev = ResumeDoc.load(path)
@@ -269,8 +221,6 @@ def build_resume_llm(cwd: str, transcript: Path | None) -> None:
         task=task or prev_task or tail["rough_task"],
         next_step=next_step or prev_next,
         git=git,
-        last_error=tail["last_error"] or "none",
-        edited_files=tail["edited_files"],
     ).write(path)
 
 
@@ -333,11 +283,10 @@ def _colorize_banner(text: str) -> str:
     reset = "\033[0m"
     brand = "\033[1;35m"  # bold magenta — "where was i"
     proj = "\033[1;36m"  # bold cyan — project name
-    num = "\033[1;33m"  # bold yellow — branch / counts
-    dim = "\033[90m"  # gray — separators, low-signal lines
+    num = "\033[1;33m"  # bold yellow — branch
+    dim = "\033[90m"  # gray — separators + the git grounding line
     label = "\033[1;32m"  # bold green — the load-bearing Last/Next labels
     val = "\033[97m"  # bright white — Last/Next values
-    err = "\033[1;31m"  # bold red — a real last error
     sep = f" {dim}·{reset} "
     lines = []
     for ln in text.splitlines():
@@ -347,17 +296,14 @@ def _colorize_banner(text: str) -> str:
             if len(parts) > 1:
                 head += sep + f"{dim}branch{reset} {num}{parts[1].replace('branch ', '', 1)}{reset}"
             lines.append(head)
-        elif ln.startswith("Last error:"):
-            v = ln.split(":", 1)[1].strip()
-            lines.append(f"{dim}Last error:{reset} {dim if v == 'none' else err}{v}{reset}")
         elif ln.startswith("Last:"):
             lines.append(f"{label}Last:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
         elif ln.startswith("Next:"):
             lines.append(f"{label}Next:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
-        elif ln.startswith("Repo:") or ln.startswith("Files:"):
+        elif ln.strip():  # the git grounding line → low-signal gray
             lines.append(f"{dim}{ln}{reset}")
         else:
-            lines.append(ln)
+            lines.append(ln)  # blank line
     return "\n".join(lines)
 
 

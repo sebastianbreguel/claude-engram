@@ -40,7 +40,7 @@ Manual installs use `$HOME/.claude` instead of `$CLAUDE_PLUGIN_ROOT` — both pa
 ## The resume file
 
 One Markdown file per project, **replace-on-write** (no history). The two `Last`/`Next`
-lines are the LLM-written narrative; everything else is cheap git/transcript context.
+lines are the LLM-written narrative (the hero); one compact git line grounds them.
 
 ```markdown
 # where was i: <project>  ·  branch <branch>
@@ -48,15 +48,15 @@ lines are the LLM-written narrative; everything else is cheap git/transcript con
 Last: <last task — LLM, from the last compaction>
 Next: <next step — LLM>
 
-Repo: <branch> · <N> uncommitted · last: <hash> <subject>
-Files: <dirty + recently edited files, capped>
-Last error: <last error string, or "none">
+<N> uncommitted · <hash> <subject>
 ```
 
 `ResumeDoc` (in `wherewasi.py`) owns this format: `render()` builds the Markdown,
 `write()` saves it atomically (write to `.tmp`, then `replace`) after copying the prior
-file to `.prev`, and `load()` parses back the project + `Last`/`Next`/`Last error`
-lines. Git is **never** parsed back from disk — it's always rebuilt live (see below).
+file to `.prev`, and `load()` parses back the project + `Last`/`Next` lines. Git is
+**never** parsed back from disk — it's always rebuilt live (see below). There is
+deliberately no file list or last-error line: it would just echo `git status` and dilute
+the two lines that actually carry intent.
 
 ## Orchestration
 
@@ -89,7 +89,7 @@ lines. Git is **never** parsed back from disk — it's always rebuilt live (see 
 | Unit | Responsibility |
 |---|---|
 | `build_git_context(cwd)` | Branch, uncommitted count, recent commits, dirty files. Best-effort, 2s timeout, empty dict on non-repo. |
-| `parse_transcript_tail(path)` | `rough_task` (last user message), `edited_files` (Edit/Write/NotebookEdit tool_use), `last_error` (tool_result error text) from the tail. |
+| `parse_transcript_tail(path)` | `rough_task` (the last user message) from the tail — a fallback for `Last` when there's no LLM narrative yet. |
 | `ResumeDoc` | Load / render / write the resume Markdown, with a `.prev` backup. |
 | `capture_rolling(cwd, transcript)` | No-LLM refresh (UserPromptSubmit path). |
 | `build_resume_llm(cwd, transcript)` | LLM refresh (PreCompact path) + `_run_claude` with the `WWI_MODEL` override. |

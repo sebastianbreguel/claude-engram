@@ -18,18 +18,16 @@ When you open Claude Code in a project, WhereWasI injects a short resume at the 
 Last: Rewriting docs for the resume pivot (README + architecture).
 Next: Run the full test suite + ruff, then deploy with install.sh.
 
-Repo: wherewasi-v2 · 3 uncommitted · last: a1b2c3d docs rewrite
-Files: README.md, docs/architecture.md
-Last error: none
+3 uncommitted · a1b2c3d docs rewrite
 ```
 
-Two load-bearing lines — **Last** (last task) and **Next** (next step) — plus cheap git context. Zero latency: it's read from a file, no LLM call at open.
+Two load-bearing lines — **Last** (where you were) and **Next** (what to do) — over one compact git line for grounding. No file dumps, no stale error echoes (you have `git` for that). Zero latency: it's read from a file, no LLM call at open.
 
 ## How it works
 
 WhereWasI is **files + hooks. No database.** One Markdown file per project at `~/.claude/wherewasi/resume/<cwd-slug>.md` (the cwd path, slashes turned to dashes), refreshed two ways:
 
-1. **Every 25 prompts** (`UserPromptSubmit`, **no LLM**) — a cheap refresh of the git fields (branch, uncommitted count, last commit, dirty files) and transcript tail (edited files, last error). Your `Last`/`Next` narrative is preserved.
+1. **Every 25 prompts** (`UserPromptSubmit`, **no LLM**) — a cheap refresh of the git line (branch, uncommitted count, last commit). Your `Last`/`Next` narrative is preserved.
 2. **On compaction** (`PreCompact`, **LLM**) — `claude --print` reads the transcript tail and rewrites `Last` + `Next` from what you were actually doing.
 3. **On session start** (`SessionStart`) — the resume file is read and injected (with git refreshed live). First time in a project? You get a minimal git-derived resume so you never open blank.
 
@@ -76,7 +74,7 @@ Or use the slash command: `/wherewasi` (show) · `/wherewasi --reset` (clear).
 
 Everything lives in `~/.claude/wherewasi/resume/<cwd-slug>.md` (plain Markdown). Nothing leaves your machine except the one LLM call below.
 
-- **Stored**: project name, git branch/commit/dirty-file list, the edited-files list and last-error string from the transcript tail, and the LLM-written `Last`/`Next` lines.
+- **Stored**: project name, git branch + uncommitted count + last commit, and the two LLM-written `Last`/`Next` lines.
 - **NOT stored**: no full transcripts, no source code, no secrets from `.env`.
 - **LLM calls**: only on compaction, `claude --print` (default Sonnet 4.6 — override with `WWI_MODEL`, or set it empty for your account default) reads the **tail of the transcript** to write two lines. It runs under your existing Claude Code login — **no separate API key**. Set `WWI_SKIP_LLM=1` to disable it entirely (the resume still refreshes from git on the rolling path). Note: from **2026-06-15**, `claude -p` on subscription plans (Pro/Max/Team/Enterprise) draws from a monthly [Agent SDK credit](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) you claim once. If it runs out, the LLM rewrite pauses but the rolling git refresh and session-start display keep working.
 
