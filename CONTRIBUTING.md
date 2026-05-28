@@ -1,4 +1,4 @@
-# Contributing to claude-engram
+# Contributing to wherewasi
 
 Thanks for the interest. This is a small pre-launch project; contributions land fast when they follow the repo's conventions.
 
@@ -7,8 +7,8 @@ Thanks for the interest. This is a small pre-launch project; contributions land 
 Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/sebastianbreguel/claude-engram.git
-cd claude-engram
+git clone https://github.com/sebastianbreguel/wherewasi.git
+cd wherewasi
 ./install.sh        # copies tools to ~/.claude/, registers hooks
 ```
 
