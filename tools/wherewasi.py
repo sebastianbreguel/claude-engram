@@ -323,6 +323,43 @@ def _find_transcript(payload: dict) -> Path | None:
     return Path(tp) if tp and Path(tp).exists() else None
 
 
+def _colorize_banner(text: str) -> str:
+    """ANSI-color the SessionStart banner. Applied to the visible systemMessage only —
+    the resume file and additionalContext stay plain (no ANSI on disk / in model context).
+    Honors NO_COLOR and TERM=dumb."""
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM", "") == "dumb":
+        return text
+    reset = "\033[0m"
+    brand = "\033[1;35m"  # bold magenta — "where was i"
+    proj = "\033[1;36m"  # bold cyan — project name
+    num = "\033[1;33m"  # bold yellow — branch / counts
+    dim = "\033[90m"  # gray — separators, low-signal lines
+    label = "\033[1;32m"  # bold green — the load-bearing Último/Sigue labels
+    val = "\033[97m"  # bright white — Último/Sigue values
+    err = "\033[1;31m"  # bold red — a real last error
+    sep = f" {dim}·{reset} "
+    lines = []
+    for ln in text.splitlines():
+        if ln.startswith("# where was i:"):
+            parts = [p.strip() for p in ln[len("# where was i:") :].strip().split("·")]
+            head = f"{brand}where was i{reset}{dim}:{reset} {proj}{parts[0]}{reset}"
+            if len(parts) > 1:
+                head += sep + f"{dim}branch{reset} {num}{parts[1].replace('branch ', '', 1)}{reset}"
+            lines.append(head)
+        elif ln.startswith("Último error:"):
+            v = ln.split(":", 1)[1].strip()
+            lines.append(f"{dim}Último error:{reset} {dim if v == 'ninguno' else err}{v}{reset}")
+        elif ln.startswith("Último:"):
+            lines.append(f"{label}Último:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
+        elif ln.startswith("Sigue:"):
+            lines.append(f"{label}Sigue:{reset} {val}{ln.split(':', 1)[1].strip()}{reset}")
+        elif ln.startswith("Repo:") or ln.startswith("Archivos:"):
+            lines.append(f"{dim}{ln}{reset}")
+        else:
+            lines.append(ln)
+    return "\n".join(lines)
+
+
 def on_session_start() -> int:
     p = _read_payload()
     cwd = p.get("cwd") or ""
@@ -333,7 +370,7 @@ def on_session_start() -> int:
     except Exception:
         ctx = ""
     show = os.environ.get("WWI_SHOW_BANNER", "1") == "1"
-    return _emit(ctx, event="SessionStart", banner=ctx if show else "")
+    return _emit(ctx, event="SessionStart", banner=_colorize_banner(ctx) if show else "")
 
 
 def on_user_prompt() -> int:

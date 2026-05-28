@@ -6,7 +6,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
-from wherewasi import capture_rolling, render_session_start, resume_path_for  # noqa: E402
+from wherewasi import _colorize_banner, capture_rolling, render_session_start, resume_path_for  # noqa: E402
 
 
 def _git(cwd, *a):
@@ -47,3 +47,23 @@ def test_render_first_session_no_file_uses_git(monkeypatch, tmp_path):
     _git(repo, "commit", "-qm", "seed")
     out = render_session_start(str(repo))  # no resume file yet
     assert "branch dev" in out
+
+
+_PLAIN = (
+    "# where was i: proj  ·  branch main\n\n"
+    "Último: doing X\nSigue: do Y\n\n"
+    "Repo: main · 0 sin commitear · último: abc\nÚltimo error: ninguno\n"
+)
+
+
+def test_colorize_banner_adds_ansi(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    colored = _colorize_banner(_PLAIN)
+    assert "\033[" in colored  # has ANSI escapes
+    assert "where was i" in colored and "doing X" in colored  # content preserved
+
+
+def test_colorize_banner_respects_no_color(monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert _colorize_banner(_PLAIN) == _PLAIN  # untouched, no ANSI
