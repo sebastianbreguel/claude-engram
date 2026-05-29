@@ -184,7 +184,7 @@ def _run_claude(prompt: str, chunk: str, timeout: int = 120) -> str:
     # Mark the child so its SessionStart/SessionEnd hooks no-op. Without this, the
     # headless `claude --print` is itself a Claude session: its SessionEnd fires our
     # hook → spawns another `claude --print` → infinite loop.
-    env = {**os.environ, "WWI_DISABLE": "1"}
+    env = {**os.environ, "WWI_CHILD": "1"}
     try:
         r = subprocess.run(cmd, input=chunk, capture_output=True, text=True, timeout=timeout, env=env)
         return r.stdout if r.returncode == 0 else ""
@@ -334,9 +334,13 @@ def _spawn_capture(kind: str, cwd: str, transcript: Path | None) -> None:
 
 
 def _hooks_disabled() -> bool:
-    """True when running inside a wherewasi-spawned `claude --print` (see _run_claude).
-    Guards every hook entrypoint against re-entrant recursion."""
-    return os.environ.get("WWI_DISABLE") == "1"
+    """True when running inside a headless `claude --print` (the LLM capture in
+    _run_claude). Guards every hook entrypoint against re-entrant recursion. Two
+    independent signals so one host change can't silently reopen the fork-bomb loop:
+      1. WWI_CHILD=1 — we set this on the spawned `claude`; its hooks inherit it.
+      2. CLAUDE_CODE_ENTRYPOINT=sdk-cli — the headless `--print` entrypoint; the
+         user's interactive session is `cli`, so this never suppresses real sessions."""
+    return os.environ.get("WWI_CHILD") == "1" or os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "sdk-cli"
 
 
 def on_session_start() -> int:
