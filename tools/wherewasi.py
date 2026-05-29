@@ -181,8 +181,12 @@ def _run_claude(prompt: str, chunk: str, timeout: int = 120) -> str:
     if model:
         cmd += ["--model", model]
     cmd += ["-p", prompt]
+    # Mark the child so its SessionStart/SessionEnd hooks no-op. Without this, the
+    # headless `claude --print` is itself a Claude session: its SessionEnd fires our
+    # hook → spawns another `claude --print` → infinite loop.
+    env = {**os.environ, "WWI_DISABLE": "1"}
     try:
-        r = subprocess.run(cmd, input=chunk, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, input=chunk, capture_output=True, text=True, timeout=timeout, env=env)
         return r.stdout if r.returncode == 0 else ""
     except Exception:
         return ""
@@ -329,7 +333,15 @@ def _spawn_capture(kind: str, cwd: str, transcript: Path | None) -> None:
         pass
 
 
+def _hooks_disabled() -> bool:
+    """True when running inside a wherewasi-spawned `claude --print` (see _run_claude).
+    Guards every hook entrypoint against re-entrant recursion."""
+    return os.environ.get("WWI_DISABLE") == "1"
+
+
 def on_session_start() -> int:
+    if _hooks_disabled():
+        return _emit()
     p = _read_payload()
     cwd = p.get("cwd") or ""
     if not cwd:
@@ -343,6 +355,8 @@ def on_session_start() -> int:
 
 
 def on_user_prompt() -> int:
+    if _hooks_disabled():
+        return _emit(event="UserPromptSubmit")
     p = _read_payload()
     cwd = p.get("cwd") or ""
     if not cwd:
@@ -358,6 +372,8 @@ def on_user_prompt() -> int:
 
 
 def on_precompact() -> int:
+    if _hooks_disabled():
+        return 0
     p = _read_payload()
     cwd = p.get("cwd") or ""
     if cwd:
@@ -372,6 +388,8 @@ def on_session_end() -> int:
     # Refresh the narrative when you leave, so short sessions that never compact aren't
     # stale next open. Fire-and-forget + detached: the LLM call runs AFTER the session
     # exits (never hangs it). Hard-kills that skip SessionEnd are covered by rolling/compact.
+    if _hooks_disabled():
+        return 0
     p = _read_payload()
     cwd = p.get("cwd") or ""
     if cwd:
