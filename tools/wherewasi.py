@@ -176,7 +176,7 @@ def _run_claude(prompt: str, chunk: str, timeout: int = 120) -> str:
     claude_bin = shutil.which("claude")
     if not claude_bin:
         return ""
-    cmd = [claude_bin, "--print"]
+    cmd = [claude_bin, "--print", "--strict-mcp-config"]
     model = os.environ.get("WWI_MODEL", "claude-sonnet-4-6")
     if model:
         cmd += ["--model", model]
