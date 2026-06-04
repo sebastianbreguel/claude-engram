@@ -42,7 +42,9 @@ if not settings_path.exists():
 settings = json.loads(settings_path.read_text())
 hooks = settings.get("hooks", {})
 
-MARKERS = ("wherewasi.py", "engram.py", "memcapture", "memdigest", "memcompact", "mempatterns")
+# Anchor on concrete script filenames so we never strip an unrelated user hook that merely
+# contains a substring like "memcapture". Keep this list identical to install.sh's STALE.
+MARKERS = ("wherewasi.py", "engram.py", "memcapture.py", "mempatterns.py")
 
 
 def strip(event_name):
