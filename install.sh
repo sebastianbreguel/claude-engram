@@ -60,7 +60,9 @@ settings = json.loads(settings_path.read_text())
 hooks = settings.setdefault("hooks", {})
 
 # Markers for stale registrations to strip: this plugin (idempotent reinstall) + legacy engram.
-STALE = ("wherewasi.py", "engram.py", "memcapture", "memdigest", "memcompact", "mempatterns")
+# Anchor on concrete script filenames (commands look like `python3 .../tools/<name>.py …`) —
+# a bare "memcapture" would also strip an UNRELATED user hook whose command merely contains it.
+STALE = ("wherewasi.py", "engram.py", "memcapture.py", "mempatterns.py")
 
 
 def ensure_hook(event_name, command):
@@ -91,6 +93,7 @@ echo "What happens now:"
 echo "  - SessionStart: shows your last task + next step for this project (zero latency)"
 echo "  - Every 25 prompts: a cheap no-LLM refresh of the resume (git + edited files)"
 echo "  - On compaction: the LLM rewrites 'last task / next step' from the transcript"
+echo "  - On session end: the same LLM rewrite runs detached, so short sessions stay fresh"
 echo ""
 echo "Commands:"
 echo "  python3 ~/.claude/tools/wherewasi.py --cwd \"\$PWD\"          # print this project's resume"
