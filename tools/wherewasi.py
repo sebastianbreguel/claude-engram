@@ -56,8 +56,16 @@ def parse_transcript_tail(transcript_path: Path) -> dict:
             continue
         content = obj.get("message", {}).get("content")
         if obj.get("type") == "user" and isinstance(content, str) and content.strip():
-            rough_task = content.strip()[:200]  # latest wins
+            rough_task = " ".join(content.split())[:200]  # latest wins; collapse newlines → one line
     return {"rough_task": rough_task}
+
+
+# Display-only placeholders for an empty Last/Next. Shown in the banner / additionalContext,
+# NEVER written to disk: render(placeholders=False) serializes raw values so an empty resume
+# round-trips as empty instead of persisting this text as if it were a real task (which made
+# `prev_task or fallback` short-circuit forever — the resume stuck on "(no task recorded)").
+_NO_TASK = "(no task recorded)"
+_NO_NEXT = "(no next step)"
 
 
 class ResumeDoc:
@@ -71,21 +79,28 @@ class ResumeDoc:
         self.next_step = (next_step or "").strip()
         self.git = git or {}
 
-    def render(self) -> str:
+    def render(self, *, placeholders: bool = True) -> str:
         """Lean banner: the two narrative lines are the hero (Last = where you were,
         Next = what to do), with one compact git line for grounding. No file list, no
         last-error echo — the dev has `git` for that; padding it dilutes the two lines
-        that actually carry intent."""
+        that actually carry intent.
+
+        placeholders=True (display): show a friendly hint for an empty Last/Next.
+        placeholders=False (disk, via write()): serialize raw values so an empty field
+        round-trips as empty — writing the hint to disk made load() read it back as a
+        real task and the fallback chain never recovered."""
         g = self.git
         branch = g.get("branch")
         head = f"# where was i: {self.project}"
         if branch:
             head += f"  ·  branch {branch}"
+        last = self.task or (_NO_TASK if placeholders else "")
+        nxt = self.next_step or (_NO_NEXT if placeholders else "")
         lines = [
             head,
             "",
-            f"Last: {self.task or '(no task recorded)'}",
-            f"Next: {self.next_step or '(no next step)'}",
+            f"Last: {last}",
+            f"Next: {nxt}",
         ]
         if branch:
             commits = g.get("commits") or []
@@ -104,7 +119,7 @@ class ResumeDoc:
             except Exception:
                 pass
         tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(self.render())
+        tmp.write_text(self.render(placeholders=False))  # raw values on disk; hints are display-only
         tmp.replace(path)
 
     @classmethod
@@ -112,14 +127,25 @@ class ResumeDoc:
         text = Path(path).read_text()
 
         def _field(label: str) -> str:
-            m = re.search(rf"^{label}:\s*(.*)$", text, re.MULTILINE)
+            # Line-anchored on purpose: [ \t]* (not \s*, which eats the newline and would
+            # capture the *next* field when this one is empty) and [^\n]* (not .*, so the
+            # value can't bleed past its own line).
+            m = re.search(rf"^{label}:[ \t]*([^\n]*)$", text, re.MULTILINE)
             return m.group(1).strip() if m else ""
 
         proj = ""
         m = re.search(r"^# where was i:\s*([^·]+)", text, re.MULTILINE)
         if m:
             proj = m.group(1).strip()
-        return cls(project=proj, task=_field("Last"), next_step=_field("Next"), git={})
+        task, next_step = _field("Last"), _field("Next")
+        # Neutralize the display placeholders that pre-fix files wrote to disk, so an
+        # already-stuck "(no task recorded)" resume recovers instead of shadowing the fallback.
+        return cls(
+            project=proj,
+            task="" if task == _NO_TASK else task,
+            next_step="" if next_step == _NO_NEXT else next_step,
+            git={},
+        )
 
 
 def resume_path_for(cwd: str) -> Path:
