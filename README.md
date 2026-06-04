@@ -77,14 +77,14 @@ Everything lives in `~/.claude/wherewasi/resume/<cwd-slug>.md` (plain Markdown).
 
 - **Stored**: project name, git branch + uncommitted count + last commit, and the two LLM-written `Last`/`Next` lines.
 - **NOT stored**: no full transcripts, no source code, no secrets from `.env`.
-- **LLM calls**: only on compaction, `claude --print` (default Sonnet 4.6 — override with `WWI_MODEL`, or set it empty for your account default) reads the **tail of the transcript** to write two lines. It runs under your existing Claude Code login — **no separate API key**. Set `WWI_SKIP_LLM=1` to disable it entirely (the resume still refreshes from git on the rolling path). Note: from **2026-06-15**, `claude -p` on subscription plans (Pro/Max/Team/Enterprise) draws from a monthly [Agent SDK credit](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) you claim once. If it runs out, the LLM rewrite pauses but the rolling git refresh and session-start display keep working.
+- **LLM calls**: on compaction (`PreCompact`) and at session end (`SessionEnd`), `claude --print` (default Sonnet 4.6 — override with `WWI_MODEL`, or set it empty for your account default) reads the **tail of the transcript** to write two lines. It runs under your existing Claude Code login — **no separate API key**. Set `WWI_SKIP_LLM=1` to disable it entirely (the resume still refreshes from git on the rolling path). Note: from **2026-06-15**, `claude -p` on subscription plans (Pro/Max/Team/Enterprise) draws from a monthly [Agent SDK credit](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) you claim once. If it runs out, the LLM rewrite pauses but the rolling git refresh and session-start display keep working.
 
 ## Environment variables
 
 | Variable | Default | Effect |
 |---|---|---|
 | `WWI_SHOW_BANNER` | `1` | Set to `0` to suppress the visible banner (context still injects) |
-| `WWI_SKIP_LLM` | unset | Set to `1` to skip the compaction LLM call (resume still refreshes from git) |
+| `WWI_SKIP_LLM` | unset | Set to `1` to skip the LLM rewrites (PreCompact + SessionEnd); resume still refreshes from git |
 | `WWI_MODEL` | `claude-sonnet-4-6` | Model for the LLM rewrite. Set empty to use your account default |
 | `WWI_DIGEST_EVERY` | `25` | Rolling-refresh cadence (prompts per `UserPromptSubmit` refresh) |
 

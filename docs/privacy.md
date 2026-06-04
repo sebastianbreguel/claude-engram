@@ -34,13 +34,13 @@ WhereWasI keeps one Markdown file per project at `~/.claude/wherewasi/resume/<sl
 WhereWasI makes **zero network requests** of its own. No telemetry, no analytics, no
 tracking.
 
-The only LLM interaction is `claude --print --model claude-sonnet-4-6`, invoked **on
-compaction only**. It reads the **tail of the current transcript** (last ~12 KB) and
-returns two lines (last task / next step). It runs locally through your own Claude Code
-session and uses whatever model and billing you already have configured — **no separate
-API key**. Set `WWI_SKIP_LLM=1` to disable it entirely; the resume still refreshes from git
-on the rolling path. Override the model with `WWI_MODEL` (set empty for your account
-default).
+The only LLM interaction is `claude --print --model claude-sonnet-4-6`, invoked on **two
+paths**: on compaction (`PreCompact`) and when a session ends (`SessionEnd`). Each reads the
+**tail of the current transcript** (last ~12 KB) and returns two lines (last task / next
+step). It runs locally through your own Claude Code session and uses whatever model and
+billing you already have configured — **no separate API key**. Set `WWI_SKIP_LLM=1` to
+disable both entirely; the resume still refreshes from git on the rolling path. Override the
+model with `WWI_MODEL` (set empty for your account default).
 
 ## Third-party services
 

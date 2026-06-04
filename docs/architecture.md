@@ -1,6 +1,6 @@
 # Architecture
 
-WhereWasI is a Claude Code plugin with **three hooks and one Python file**. No database, no daemon, no network I/O, no API keys. The entire plugin is `tools/wherewasi.py` (stdlib only).
+WhereWasI is a Claude Code plugin with **four hooks and one Python file**. No database, no daemon, no network I/O, no API keys. The entire plugin is `tools/wherewasi.py` (stdlib only).
 
 ## File layout (after install)
 
@@ -20,7 +20,7 @@ WhereWasI is a Claude Code plugin with **three hooks and one Python file**. No d
 
 ## Hook wiring
 
-Registered in `hooks/hooks.json` (plugin) / `~/.claude/settings.json` (manual install). Three events, one tool:
+Registered in `hooks/hooks.json` (plugin) / `~/.claude/settings.json` (manual install). Four events, one tool:
 
 ```json
 {
@@ -114,7 +114,8 @@ the two lines that actually carry intent.
 1. **One job, done well.** Show the last task + next step when you reopen a project. No
    search, no recall, no knowledge base.
 2. **Near-zero ambient cost.** ~120 tokens injected at SessionStart, read from a file. The
-   only LLM work is one `claude --print` call on compaction.
+   only LLM work is `claude --print`, on two paths: PreCompact (inline) and SessionEnd
+   (detached). Both are off the prompt hot path; set `WWI_SKIP_LLM=1` to disable them.
 3. **Files, not a database.** One Markdown file per project. No SQLite, no schema, no
    migrations, no FTS. Trivial to inspect (`cat`), trivial to reset (`rm`).
 4. **Best-effort, never blocks.** Every hook degrades silently: git failure → omit git
@@ -130,6 +131,6 @@ the two lines that actually carry intent.
 ## Why one file
 
 The whole surface is small: read git, read the transcript tail, render a Markdown block,
-wire three hooks. Collapsing it into a single `wherewasi.py` (vs. the multi-file
+wire four hooks. Collapsing it into a single `wherewasi.py` (vs. the multi-file
 `engram.py` + `memcapture.py` + `memdoctor.py` it replaced) means one place to read, one
 place to debug, and no import graph to hold in your head.
