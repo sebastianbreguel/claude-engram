@@ -86,6 +86,58 @@ ensure_hook("SessionEnd", "python3 $HOME/.claude/tools/wherewasi.py on-session-e
 settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 PYEOF
 
+# ── Codex CLI (optional) ──────────────────────────────────────────────
+# Codex hooks share Claude Code's JSON stdin/stdout wire protocol, so the same
+# wherewasi.py runs unchanged. Config lives in $CODEX_HOME/hooks.json (not
+# settings.json) and is gated by `[features].hooks = true` in config.toml.
+# There is no SessionEnd event on Codex (Stop fires every turn — too costly for
+# the LLM rewrite), so it is skipped there; PreCompact + the rolling git refresh
+# keep the resume fresh. Resume state stays shared with Claude at ~/.claude/wherewasi/.
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+if [ -d "$CODEX_DIR" ]; then
+    echo ""
+    echo "[codex] Detected $CODEX_DIR — wiring Codex too..."
+    mkdir -p "$CODEX_DIR/tools"
+    cp "$SCRIPT_DIR/tools/wherewasi.py" "$CODEX_DIR/tools/wherewasi.py"
+    chmod +x "$CODEX_DIR/tools/wherewasi.py"
+    echo "  -> $CODEX_DIR/tools/wherewasi.py"
+
+    python3 - "$CODEX_DIR" << 'PYEOF'
+import json, sys
+from pathlib import Path
+
+codex = Path(sys.argv[1])
+hp = codex / "hooks.json"
+data = json.loads(hp.read_text()) if hp.exists() else {}
+hooks = data.setdefault("hooks", {})
+
+# Codex renders neither the SessionStart `systemMessage` banner nor hook stderr — it only
+# consumes `additionalContext`, injected into the model (invisible in the TUI). So there is
+# no visible "where was I" banner on Codex; the resume reaches the model instead.
+WIRE = {
+    "SessionStart":     f"python3 {codex}/tools/wherewasi.py on-session-start",
+    "UserPromptSubmit": f"python3 {codex}/tools/wherewasi.py on-user-prompt",
+    "PreCompact":       f"python3 {codex}/tools/wherewasi.py on-precompact",
+}
+
+
+def ensure(event, command):
+    arr = hooks.setdefault(event, [])
+    for entry in arr:  # idempotent reinstall: drop any prior wherewasi entry, keep others (context-mode, etc.)
+        entry["hooks"] = [h for h in entry.get("hooks", []) if "wherewasi.py" not in h.get("command", "")]
+    arr[:] = [e for e in arr if e.get("hooks")]
+    arr.append({"hooks": [{"type": "command", "command": command}]})
+
+
+for ev, cmd in WIRE.items():
+    ensure(ev, cmd)
+
+hp.write_text(json.dumps(data, indent=2) + "\n")
+print(f"  Added Codex hooks: {', '.join(WIRE)}")
+PYEOF
+    echo "  Note: needs [features].hooks = true in config.toml; Codex may prompt to trust the hook on next launch."
+fi
+
 echo ""
 echo "Installation complete!"
 echo ""

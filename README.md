@@ -10,7 +10,7 @@ This is **not** a memory bank. No search, no recall by topic, no accumulated his
 
 ## What you see
 
-When you open Claude Code in a project, WhereWasI injects a short resume at the top of the session:
+When you open Claude Code (or **Codex CLI**) in a project, WhereWasI injects a short resume at the top of the session:
 
 ```
 # where was i: wherewasi  ·  branch wherewasi-v2
@@ -36,7 +36,7 @@ Replace semantics: the file always reflects the current state. No history accumu
 
 ## Install
 
-**Requirements:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code), `python3` (stdlib only — no `uv`, no pip, no deps).
+**Requirements:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex CLI](https://developers.openai.com/codex), `python3` (stdlib only — no `uv`, no pip, no deps).
 
 **As a Claude Code plugin (recommended):**
 
@@ -53,6 +53,8 @@ cd wherewasi && ./install.sh
 ```
 
 > Use **the marketplace install OR `./install.sh`, not both** — each registers the hooks separately, so doing both fires every hook twice (and pays the compaction LLM cost twice).
+
+**Codex CLI (also supported):** `./install.sh` auto-detects `~/.codex` (or `$CODEX_HOME`) and wires Codex too. Codex hooks share Claude Code's JSON stdin/stdout wire protocol, so the same `wherewasi.py` runs unchanged. It needs `[features].hooks = true` in `~/.codex/config.toml`, and Codex may prompt to trust the hook on first launch. Resume state is **shared** with Claude (one `~/.claude/wherewasi/resume/<slug>.md` per project), so switching between the two on the same repo shows the same "where was I". Note: Codex has no `SessionEnd` event, so the end-of-session LLM rewrite is skipped there — `PreCompact` + the rolling git refresh keep it fresh.
 
 > **First session in a project:** you get a minimal git-only resume.
 > **After you've worked a bit:** the resume fills in with your last task + next step.
