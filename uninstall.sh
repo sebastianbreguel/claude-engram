@@ -63,4 +63,30 @@ settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 print("  Hooks removed from settings.json")
 PYEOF
 
+# Codex CLI cleanup (no-op if Codex was never wired). Resume data under
+# ~/.claude/wherewasi was already removed above (shared state).
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+if [ -d "$CODEX_DIR" ]; then
+    rm -f "$CODEX_DIR/tools/wherewasi.py"
+    if [ -f "$CODEX_DIR/hooks.json" ]; then
+        python3 - "$CODEX_DIR" << 'PYEOF'
+import json, sys
+from pathlib import Path
+
+hp = Path(sys.argv[1]) / "hooks.json"
+data = json.loads(hp.read_text())
+hooks = data.get("hooks", {})
+for ev in ("SessionStart", "UserPromptSubmit", "PreCompact"):
+    arr = hooks.get(ev, [])
+    for entry in arr:
+        entry["hooks"] = [h for h in entry.get("hooks", []) if "wherewasi.py" not in h.get("command", "")]
+    hooks[ev] = [e for e in arr if e.get("hooks")]
+    if not hooks[ev]:
+        del hooks[ev]
+hp.write_text(json.dumps(data, indent=2) + "\n")
+print("  Hooks removed from Codex hooks.json")
+PYEOF
+    fi
+fi
+
 echo "[3/3] Done."

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Codex CLI support.** `install.sh` auto-detects `~/.codex` (or `$CODEX_HOME`) and wires
+  Codex too. Codex hooks share Claude Code's JSON stdin/stdout wire protocol, so the same
+  `tools/wherewasi.py` runs unchanged. Hooks wired: `SessionStart`, `UserPromptSubmit`,
+  `PreCompact`. Resume state is **shared** with Claude (`~/.claude/wherewasi/resume/<slug>.md`),
+  so switching harnesses on the same project shows the same resume. `uninstall.sh` removes the
+  Codex hooks symmetrically.
+
+### Notes
+- Codex has **no `SessionEnd`** event (and `Stop` fires every turn — too costly for the LLM
+  rewrite), so the end-of-session rewrite is skipped on Codex; `PreCompact` + the rolling git
+  refresh keep the resume fresh.
+- Codex injects the SessionStart resume into the **model** via `additionalContext` (no visible
+  banner — it renders neither `systemMessage` nor hook stderr). View it on demand with
+  `python3 ~/.codex/tools/wherewasi.py --cwd "$PWD"`.
+- Requires `[features].hooks = true` in `~/.codex/config.toml`; Codex may prompt to trust the
+  hook on first launch.
+
 ## 0.1.0 — WhereWasI (2026-05-28)
 
 **Breaking: renamed from `claude-engram` to `wherewasi` and pivoted from a generalized
